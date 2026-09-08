@@ -193,3 +193,52 @@ def invoice_stats(db: Session = Depends(get_db)):
         "rejected": int(rejected),
         "pending": int(pending),
     }
+
+
+@app.get("/insights")
+def invoice_insights(db: Session = Depends(get_db)):
+    """Return high-level AI insights based on historical invoice data.
+
+    Calculates top vendor, approval rate, and verification accuracy.
+    """
+    total = db.query(func.count(Invoice.id)).scalar() or 0
+    if total == 0:
+        return {
+            "top_vendor": "No data",
+            "approval_rate": 0.0,
+            "high_value_count": 0,
+            "accuracy": 0.0,
+        }
+
+    # Most frequent vendor
+    top_vendor_row = (
+        db.query(Invoice.vendor, func.count(Invoice.id))
+        .filter(Invoice.vendor != None)
+        .group_by(Invoice.vendor)
+        .order_by(func.count(Invoice.id).desc())
+        .first()
+    )
+    top_vendor = top_vendor_row[0] if top_vendor_row else "Unknown"
+
+    # Approval rate (%)
+    approved_count = db.query(func.count(Invoice.id)).filter(func.upper(Invoice.decision) == "APPROVE").scalar() or 0
+    approval_rate = (approved_count / total) * 100
+
+    # High-value approved invoices (>= 200,000)
+    high_value_count = db.query(func.count(Invoice.id)).filter(
+        func.upper(Invoice.decision) == "APPROVE",
+        Invoice.total >= 200_000
+    ).scalar() or 0
+
+    # Accuracy: (Approved + Rejected) / Total
+    verified_count = db.query(func.count(Invoice.id)).filter(
+        func.upper(Invoice.decision).in_(["APPROVE", "REJECT"])
+    ).scalar() or 0
+    accuracy = (verified_count / total) * 100
+
+    return {
+        "top_vendor": top_vendor,
+        "approval_rate": round(approval_rate, 1),
+        "high_value_count": int(high_value_count),
+        "accuracy": round(accuracy, 1),
+    }
