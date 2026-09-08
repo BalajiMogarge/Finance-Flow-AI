@@ -132,22 +132,16 @@ Then set `UPLOAD_DIR=/var/data/uploads` in the Render dashboard.
 
 ---
 
-## 3. SQLite considerations
+## 3. SQLite persistence
 
-The codebase does not yet use a database. When one is added,
-SQLite is the simplest choice for low-traffic deployments:
+The application uses a SQLite database (`finance_flow.db`) for storing processed invoices and generating analytics.
 
-* **Location:** commit a `.gitignore`d `backend/data.db` and mount a
-  Render Persistent Disk at that path.
-* **Connection string:** `sqlite:///./data.db` (relative to
-  `UPLOAD_DIR`).
-* **Concurrency:** SQLite serialises writes. For a multi-worker
-  deployment, set `WEB_CONCURRENCY=1` or move to Postgres.
-* **Backups:** snapshot the persistent disk on a schedule.
+* **Location:** The database is stored in the `backend/` root.
+* **Persistence on Render:** Since Render's filesystem is ephemeral, you **must** attach a Render Persistent Disk to the root of your backend service (or a specific data folder) to ensure that your invoices and statistics are not lost upon redeployment.
+* **Concurrency:** SQLite serialises writes. For this reason, keep `WEB_CONCURRENCY=1` in your Render environment variables.
+* **Backups:** Persistent disks on Render can be snapshotted to prevent data loss.
 
-For production with multiple workers or replicas, prefer Postgres
-(available as a Render Key-Value store) and set
-`DATABASE_URL=postgresql://...` in the Render dashboard.
+For production environments with higher traffic or multiple worker replicas, it is recommended to migrate to a managed PostgreSQL instance (available via Render) and update the `DATABASE_URL` in `backend/app/database.py`.
 
 ---
 

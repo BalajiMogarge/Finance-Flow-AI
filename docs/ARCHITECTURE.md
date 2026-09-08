@@ -93,10 +93,18 @@ Key behaviours:
 The backend is a small FastAPI service. The `app/` package holds all
 runtime modules; `tests/` holds the pytest suite.
 
+### Persistence
+The application uses a SQLite database (`finance_flow.db`) managed via SQLAlchemy.
+The `Invoice` model captures processed invoice data, including extracted fields,
+the final decision, and a server-side timestamp. This allows the dashboard to
+render historical lists and calculated statistics.
+
 ```
 backend/
 ├── app/
 │   ├── __init__.py
+│   ├── database.py            # SQLite configuration & session management
+│   ├── models.py             # SQLAlchemy ORM models
 │   ├── main.py            # FastAPI app, /health and /upload routes
 │   ├── ocr.py             # EasyOCR wrapper, image → text + confidences
 │   ├── extractor.py       # text → structured fields (regex)
@@ -260,8 +268,6 @@ FinancialManager/
 
 ## What is intentionally *not* in the architecture yet
 
-* No database. Processed invoices are not persisted; only the raw file
-  is kept in `backend/uploads/`.
 * No auth. Every endpoint is open.
 * No `/invoices`, `/stats`, `/vendors`, or `/reports` API routes —
   the navbar links are placeholders.
