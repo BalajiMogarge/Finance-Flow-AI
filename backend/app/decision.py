@@ -18,7 +18,7 @@ emits to the frontend.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -47,28 +47,18 @@ def _gstin_checksum_is_valid(gstin: str) -> bool:
     if not chars[:14].isalnum() or not chars[14].isalnum():
         return False
 
-    # Character -> value map per the GSTN spec.
-    value_map = {
-        **{c: i for i, c in enumerate("0123456789")},
-        **{c: i + 10 for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")},
-    }
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    total = 0
+    # GSTN applies the first multiplier at the right-hand side of the
+    # 14-character body. Iterating left-to-right therefore starts at 1.
     factor = 1
-    total = 0
     for ch in chars[:14]:
-        total += value_map[ch] * factor
+        product = alphabet.index(ch) * factor
+        total += (product // 36) + (product % 36)
         factor = 1 if factor == 2 else 2
-        # If the product exceeds one digit, subtract 9 — equivalent to
-        # summing the digits of the product.
-        if factor == 2:
-            # re-derive the running total with the doubled contribution
-            pass
-    # Simpler equivalent of the loop above, kept readable:
-    total = 0
-    for index, ch in enumerate(chars[:14]):
-        product = value_map[ch] * (2 if index % 2 == 0 else 1)
-        total += product if product < 10 else (product - 9)
-    expected = (10 - (total % 10)) % 10
-    return value_map[chars[14]] == expected
+
+    expected = alphabet[(36 - (total % 36)) % 36]
+    return chars[14] == expected
 
 
 def _is_valid_gstin(value: Optional[str]) -> bool:

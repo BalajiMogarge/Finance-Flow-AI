@@ -23,12 +23,11 @@ from unittest.mock import patch
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.decision import make_decision  # noqa: E402
+from app.decision import _gstin_checksum_is_valid, make_decision  # noqa: E402
 
 
-# A checksum-valid 15-character GSTIN. The checksum digit was chosen
-# so it passes :func:`app.decision._gstin_checksum_is_valid`.
-VALID_GSTIN = "22AAAAA0000A1Z0"
+# A real checksum-valid GSTIN example.
+VALID_GSTIN = "27AAPFU0939F1ZV"
 
 
 def _approved_fields() -> dict:
@@ -51,6 +50,12 @@ def _approved_validation() -> dict:
 
 class DecisionUnitTests(unittest.TestCase):
     """Direct tests of :func:`make_decision`."""
+
+    def test_gstin_checksum_known_valid_value(self):
+        self.assertTrue(_gstin_checksum_is_valid(VALID_GSTIN))
+
+    def test_gstin_checksum_rejects_wrong_check_digit(self):
+        self.assertFalse(_gstin_checksum_is_valid("27AAPFU0939F1Z0"))
 
     # ------------------------------------------------------------------
     # APPROVE

@@ -7,7 +7,10 @@
  * staging environment without combing through the components.
  */
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(
+  /\/+$/,
+  "",
+);
 
 // ---------------------------------------------------------------------------
 // Types — kept close to the FastAPI schemas in ``app/main.py`` and

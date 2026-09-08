@@ -35,10 +35,7 @@ Vercel auto-detects these for Next.js, but the canonical commands
 
 ### 1.3 Environment variables
 
-The frontend does not currently read any environment variables
-(there are no `process.env.*` references in the source). If you
-intend to point the upload widget at a deployed backend, add a
-variable and reference it from `UploadCard.tsx`:
+The frontend reads `NEXT_PUBLIC_API_URL` as the backend base URL:
 
 | Name            | Example                                  | Purpose                                      |
 | --------------- | ---------------------------------------- | -------------------------------------------- |
@@ -57,7 +54,7 @@ to the `allow_origins` list and redeploy the backend.
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
 | Build fails with `Module not found: Can't resolve '@/lib/cn'` | `tsconfig.json` paths not picked up | Confirm `"baseUrl"` / `"paths": {"@/*": ["./src/*"]}` is present (it already is). |
-| 404 on `/upload` from the browser | Frontend still hard-codes `http://127.0.0.1:8000` | Set `NEXT_PUBLIC_API_URL` and update `UploadCard.tsx` to read it. |
+| Upload requests target localhost | `NEXT_PUBLIC_API_URL` is unset | Set `NEXT_PUBLIC_API_URL` to the deployed backend URL and redeploy. |
 | `CORS policy: No 'Access-Control-Allow-Origin'` | Backend not redeployed with the Vercel origin | Add the origin to `allow_origins` in `main.py` and redeploy Render. |
 
 ---
@@ -83,8 +80,7 @@ to the `allow_origins` list and redeploy the backend.
 
 ### 2.3 Build commands
 
-The repository does not currently ship a `requirements.txt`. Create
-one at `backend/requirements.txt` with at least:
+The repository ships `backend/requirements.txt`. Install it with:
 
 ```
 fastapi
@@ -96,8 +92,6 @@ pillow
 pytest
 httpx
 ```
-
-Then `pip install -r requirements.txt` is your build command.
 
 > **Cold starts.** EasyOCR downloads model weights (~100 MB) on the
 > first request after a cold start, which can take 30–60 seconds.

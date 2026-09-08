@@ -17,9 +17,8 @@ contributes to the final decision.
 | Git                 | any recent          |                                                               |
 | (Optional) CUDA     | n/a                 | EasyOCR runs on CPU by default (`gpu=False`).                 |
 
-A `requirements.txt` is not yet checked in; create one when you set
-the project up locally. The full list is in
-[DEPLOYMENT.md](./DEPLOYMENT.md#23-build-commands).
+Install the committed `backend/requirements.txt` in a Python 3.10-3.12
+virtual environment. Python 3.14 is not supported by the EasyOCR stack.
 
 ---
 

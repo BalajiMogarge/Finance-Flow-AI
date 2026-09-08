@@ -6,9 +6,8 @@ service binds to `http://0.0.0.0:8000` by default and CORS is
 configured to accept the Next.js dev server on `localhost:3000`,
 `localhost:3001`, `127.0.0.1:3000`, and `127.0.0.1:3001`.
 
-> **Scope note.** Only `/health` and `/upload` are implemented in
-> `main.py`. The `/invoices` and `/stats` endpoints documented below
-> are *not yet present* — they are listed for forward compatibility.
+> **Scope note.** `/health`, `/upload`, `/invoices`, and `/stats` are
+> implemented in `main.py`.
 
 ---
 

@@ -25,7 +25,7 @@ type ResultEntry = {
   result: UploadResponse;
 };
 
-const ACCEPTED = [".pdf", ".png", ".jpg", ".jpeg", ".webp"];
+const ACCEPTED = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"];
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -138,7 +138,7 @@ export function UploadCard({ onUploadComplete }: Props) {
             Upload invoices
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            PDF, PNG, JPG, or WebP — up to 10 MB each.
+            PNG, JPG, WebP, BMP, or TIFF — up to 10 MB each.
           </p>
         </div>
         <span

@@ -43,7 +43,7 @@ table is a near-term follow-up.
 | Image I/O    | Pillow · NumPy                                                    |
 | Validation   | Pure Python (regex + GSTN checksum + arithmetic checks)           |
 | Tests        | `pytest` · `fastapi.testclient` · `httpx`                         |
-| Storage      | Local filesystem (`backend/uploads/`) — no database yet           |
+| Storage      | Local upload filesystem plus SQLite invoice persistence             |
 
 ---
 

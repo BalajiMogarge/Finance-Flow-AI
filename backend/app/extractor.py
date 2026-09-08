@@ -14,6 +14,7 @@ frontend can render them directly.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any, Optional
 
 
@@ -25,30 +26,37 @@ from typing import Any, Optional
 # Group 1 is the integer part, group 2 the fractional part. The regex
 # intentionally accepts an Indian-style "1,23,456.78" grouping.
 _NUMBER_PATTERN = re.compile(
-    r"""
-    (?<![A-Za-z0-9])              # not glued to an alphanumeric char on the left
-    (?P<int>\d{1,3}(?:[,]\d{2,3})*|\d+)  # 1234 or 1,23,456
-    (?:[.](?P<frac>\d{1,2}))?     # optional .56
-    (?![A-Za-z0-9])               # not glued on the right
-    """,
-    re.VERBOSE,
+    r"(?<![A-Za-z0-9])\d{1,3}(?:[.,]\d{2,3})+(?:[.,]\d{1,2})?"
+    r"|(?<![A-Za-z0-9])\d+(?:[.,]\d{1,2})?(?![A-Za-z0-9])"
 )
 
 
 def _parse_number(raw: str) -> Optional[float]:
     """Parse a numeric token pulled out of OCR text into a float.
 
-    Handles commas as thousands separators and a single dot as the decimal
-    mark. Returns ``None`` when the input can't be interpreted.
+    Handles various thousands separators (comma or dot) and decimal marks.
+    Returns ``None`` when the input can't be interpreted.
     """
     if raw is None:
         return None
-    cleaned = raw.replace(",", "").replace(" ", "").strip()
-    # OCR sometimes swaps '.' and ',' for decimal marks.
-    if cleaned.count(".") > 1 and "," in cleaned:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    elif cleaned.count(",") == 1 and cleaned.count(".") == 0:
-        cleaned = cleaned.replace(",", ".")
+    cleaned = raw.replace(" ", "").strip()
+
+    # When both separators occur, the final separator is the decimal mark.
+    if "." in cleaned and "," in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            # European: 1.234,56 -> 1234.56
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            # American/Indian: 1,234.56 or 1,23,456.78 -> 1234.56
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned or "." in cleaned:
+        separator = "," if "," in cleaned else "."
+        fractional_digits = len(cleaned) - cleaned.rfind(separator) - 1
+        if fractional_digits in (1, 2):
+            cleaned = cleaned.replace(separator, ".")
+        else:
+            cleaned = cleaned.replace(separator, "")
+
     try:
         return float(cleaned)
     except ValueError:
@@ -173,13 +181,14 @@ _VENDOR_PATTERNS: list[re.Pattern[str]] = [
 
 def _normalise_date(year: int, month: int, day: int) -> Optional[str]:
     """Return ``YYYY-MM-DD`` if the components form a real date."""
-    if not (1 <= month <= 12 and 1 <= day <= 31):
-        return None
     if year < 100:
         year += 2000 if year < 70 else 1900
     if year < 1900 or year > 2100:
         return None
-    return f"{year:04d}-{month:02d}-{day:02d}"
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
 
 
 def _extract_invoice_number(text: str) -> Optional[str]:
@@ -240,19 +249,36 @@ def _extract_vendor(text: str) -> Optional[str]:
                 return value
 
     # Fallback: the first short line near the top of the invoice is usually
-    # the company name. Skip lines that look like addresses, dates, or
-    # pure-numeric tokens.
-    for raw_line in text.splitlines():
+    # the company name.
+    excluded_starts = (
+        "invoice", "bill", "tax", "gstin", "gst", "date",
+        "total", "amount", "subtotal", "address", "contact", "phone", "email"
+    )
+    business_indicators = ("ltd", "pvt", "corp", "inc", "llp", "services", "enterprises")
+
+    lines = text.splitlines()
+    best_candidate = None
+
+    for raw_line in lines[:15]:  # Only look at the first 15 lines
         line = raw_line.strip(" -:.;,")
         if not line or len(line) < 3 or len(line) > 60:
             continue
-        if line.lower().startswith(("invoice", "bill", "tax", "gstin", "gst", "date")):
+        if line.lower().startswith(excluded_starts):
             continue
         if _NUMBER_PATTERN.fullmatch(line):
             continue
-        if any(ch.isalpha() for ch in line):
+        if not any(ch.isalpha() for ch in line):
+            continue
+
+        # Strong signal: contains a business suffix
+        if any(ind in line.lower() for ind in business_indicators):
             return line
-    return None
+
+        # Weak signal: just a reasonable text line
+        if not best_candidate:
+            best_candidate = line
+
+    return best_candidate
 
 
 def _extract_amounts(text: str) -> dict[str, Optional[float]]:

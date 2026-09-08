@@ -1,5 +1,5 @@
-from pathlib import Path
-import shutil
+from pathlib import Path, PurePosixPath
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,12 +35,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Folder where uploaded invoices will be stored
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Folder where uploaded invoices will be stored.
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # MIME types / extensions that EasyOCR can read directly.
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def _display_filename(filename: str | None) -> str:
+    """Return a basename safe to display; never use it for storage."""
+    candidate = PurePosixPath((filename or "upload").replace("\\", "/")).name
+    return candidate.replace("\x00", "") or "upload"
 
 
 def _save_invoice(
@@ -80,49 +88,48 @@ async def upload_invoice(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    file_path = UPLOAD_DIR / file.filename
-
-    # Persist the upload first so the client always gets something back, even
-    # if OCR fails downstream.
-    with file_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    suffix = file_path.suffix.lower()
-    response: dict = {
-        "filename": file.filename,
-        "saved_to": str(file_path),
-        "status": "uploaded",
-    }
-
-    # OCR is only wired for image invoices for now. PDF support lands in the
-    # next step; unknown extensions are still accepted but skipped.
-    if suffix in IMAGE_EXTENSIONS:
-        try:
-            ocr_result = image_to_text(file_path)
-        except Exception as exc:  # noqa: BLE001 - surface OCR failures to caller
-            raise HTTPException(
-                status_code=500,
-                detail=f"OCR failed for {file.filename}: {exc}",
-            ) from exc
-
-        fields = extract_invoice_fields(ocr_result)
-        validation = validate_invoice(fields)
-        decision = make_decision(
-            validation,
-            fields,
-            ocr_result.get("average_confidence"),
+    filename = _display_filename(file.filename)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported file type. Upload a PNG, JPG, WebP, BMP, or TIFF image.",
         )
 
-        # Persist the processed invoice. The response payload below
-        # remains identical to the previous contract — the database
-        # write is purely additive.
-        _save_invoice(db, file.filename, fields, decision)
+    file_path = UPLOAD_DIR / f"{uuid4().hex}{suffix}"
+    written = 0
+    try:
+        with file_path.open("xb") as buffer:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Upload exceeds the 10 MB limit.")
+                buffer.write(chunk)
+    except Exception:
+        file_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
-        response["status"] = "processed"
+    response: dict = {
+        "filename": filename,
+        "status": "processed",
+    }
+
+    try:
+        ocr_result = image_to_text(file_path)
+        fields = extract_invoice_fields(ocr_result)
+        validation = validate_invoice(fields)
+        decision = make_decision(validation, fields, ocr_result.get("average_confidence"))
+        _save_invoice(db, filename, fields, decision)
         response["ocr"] = ocr_result
         response["fields"] = fields
         response["validation"] = validation
         response["decision"] = decision
+    except Exception as exc:
+        db.rollback()
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Processing failed for {filename}.") from exc
 
     return response
 
