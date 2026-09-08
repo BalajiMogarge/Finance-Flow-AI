@@ -44,6 +44,13 @@ export type StatsResponse = {
   pending: number;
 };
 
+export type InsightsResponse = {
+  top_vendor: string;
+  approval_rate: number;
+  high_value_count: number;
+  accuracy: number;
+};
+
 export type ExtractedFields = {
   invoice_number?: string | null;
   vendor?: string | null;
@@ -140,6 +147,10 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchStats(): Promise<StatsResponse> {
   return jsonFetch<StatsResponse>("/stats");
+}
+
+export function fetchInsights(): Promise<InsightsResponse> {
+  return jsonFetch<InsightsResponse>("/insights");
 }
 
 export function fetchInvoices(): Promise<InvoiceRow[]> {

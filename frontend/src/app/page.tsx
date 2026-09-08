@@ -1,17 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navbar } from "@/components/Navbar";
 import { UploadCard } from "@/components/UploadCard";
 import { StatsCards } from "@/components/StatsCards";
 import { RecentInvoicesTable } from "@/components/RecentInvoicesTable";
 import { UploadResultPanel } from "@/components/UploadResultPanel";
-import type { UploadResponse } from "@/lib/api";
+import type { UploadResponse, InsightsResponse } from "@/lib/api";
+import { fetchInsights } from "@/lib/api";
 
 export default function DashboardPage() {
-  // The most recent successful upload. The panel renders below the
-  // UploadCard whenever this is non-null.
-  const [latestResult, setLatestResult] = useState<UploadResponse | null>(null);
+  // The results of successful uploads in the current session.
+  const [uploadResults, setUploadResults] = useState<UploadResponse[]>([]);
+  const [insights, setInsights] = useState<InsightsResponse | null>(null);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+
+  async function loadInsights() {
+    setIsLoadingInsights(true);
+    try {
+      const data = await fetchInsights();
+      setInsights(data);
+    } catch (err) {
+      console.error("Failed to load insights:", err);
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  }
+
+  useEffect(() => {
+    loadInsights();
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -33,13 +51,37 @@ export default function DashboardPage() {
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
             <div className="space-y-6 lg:col-span-3">
-              <UploadCard onUploadComplete={setLatestResult} />
-              {latestResult && (
-                <UploadResultPanel
-                  result={latestResult}
-                  onDismiss={() => setLatestResult(null)}
-                />
-              )}
+              <UploadCard
+                onUploadComplete={(result) => {
+                  setUploadResults((prev) => [...prev, result]);
+                  loadInsights();
+                }}
+              />
+              <div className="space-y-4">
+                {uploadResults.length > 0 && (
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">
+                      Session Results
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setUploadResults([])}
+                      className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
+                {uploadResults.map((result, idx) => (
+                  <UploadResultPanel
+                    key={`${result.filename}-${idx}`}
+                    result={result}
+                    onDismiss={() => {
+                      setUploadResults((prev) => prev.filter((_, i) => i !== idx));
+                    }}
+                  />
+                ))}
+              </div>
             </div>
 
             <aside className="lg:col-span-2">
@@ -52,44 +94,65 @@ export default function DashboardPage() {
                 </p>
 
                 <ul className="mt-5 space-y-4 text-sm">
-                  <li className="flex gap-3">
-                    <span
-                      className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600"
-                      aria-hidden
-                    />
-                    <p className="text-zinc-700 dark:text-zinc-300">
-                      3 invoices from{" "}
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                        Initech Software
-                      </span>{" "}
-                      exceed the historical average by 18%.
-                    </p>
-                  </li>
-                  <li className="flex gap-3">
-                    <span
-                      className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
-                      aria-hidden
-                    />
-                    <p className="text-zinc-700 dark:text-zinc-300">
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                        138
-                      </span>{" "}
-                      pending invoices older than 7 days.
-                    </p>
-                  </li>
-                  <li className="flex gap-3">
-                    <span
-                      className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
-                      aria-hidden
-                    />
-                    <p className="text-zinc-700 dark:text-zinc-300">
-                      Verification accuracy:{" "}
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                        98.4%
-                      </span>
-                      .
-                    </p>
-                  </li>
+                  {isLoadingInsights ? (
+                    <li className="flex items-center gap-3 py-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-600 dark:border-zinc-700 dark:border-t-blue-400" />
+                      <p className="text-zinc-500">Calculating insights...</p>
+                    </li>
+                  ) : insights ? (
+                    <>
+                      <li className="flex gap-3">
+                        <span
+                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600"
+                          aria-hidden
+                        />
+                        <p className="text-zinc-700 dark:text-zinc-300">
+                          Top vendor is{" "}
+                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                            {insights.top_vendor}
+                          </span>
+                          .
+                        </p>
+                      </li>
+                      <li className="flex gap-3">
+                        <span
+                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
+                          aria-hidden
+                        />
+                        <p className="text-zinc-700 dark:text-zinc-300">
+                          Overall approval rate:{" "}
+                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                            {insights.approval_rate}%
+                          </span>
+                          .
+                        </p>
+                      </li>
+                      <li className="flex gap-3">
+                        <span
+                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
+                          aria-hidden
+                        />
+                        <p className="text-zinc-700 dark:text-zinc-300">
+                          {insights.high_value_count} approved high-value invoices.
+                        </p>
+                      </li>
+                      <li className="flex gap-3">
+                        <span
+                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
+                          aria-hidden
+                        />
+                        <p className="text-zinc-700 dark:text-zinc-300">
+                          Verification accuracy:{" "}
+                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                            {insights.accuracy}%
+                          </span>
+                          .
+                        </p>
+                      </li>
+                    </>
+                  ) : (
+                    <li className="text-zinc-500">No insights available.</li>
+                  )}
                 </ul>
 
                 <div className="mt-auto pt-6">
