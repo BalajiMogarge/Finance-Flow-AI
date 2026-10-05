@@ -14,16 +14,27 @@ export default function DashboardPage() {
   const [uploadResults, setUploadResults] = useState<UploadResponse[]>([]);
   const [insights, setInsights] = useState<InsightsResponse | null>(null);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   async function loadInsights() {
     setIsLoadingInsights(true);
     try {
-      const data = await fetchInsights();
+      const data = await fetchInsights(30);
       setInsights(data);
     } catch (err) {
       console.error("Failed to load insights:", err);
     } finally {
       setIsLoadingInsights(false);
+    }
+  }
+
+  async function handleRunVerification() {
+    setIsVerifying(true);
+    try {
+      await loadInsights();
+      window.dispatchEvent(new Event("finance-flow:refresh"));
+    } finally {
+      setTimeout(() => setIsVerifying(false), 400);
     }
   }
 
@@ -158,9 +169,11 @@ export default function DashboardPage() {
                 <div className="mt-auto pt-6">
                   <button
                     type="button"
-                    className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                    onClick={handleRunVerification}
+                    disabled={isVerifying}
+                    className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-75"
                   >
-                    Run verification
+                    {isVerifying ? "Verifying & syncing..." : "Run verification"}
                   </button>
                 </div>
               </section>

@@ -1,11 +1,15 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { Bell, Search, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-type NavItem = { label: string; href: string; active?: boolean };
+type NavItem = { label: string; href: string };
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/", active: true },
+  { label: "Dashboard", href: "/" },
   { label: "Invoices", href: "/invoices" },
   { label: "Vendors", href: "/vendors" },
   { label: "Reports", href: "/reports" },
@@ -13,6 +17,17 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function Navbar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      router.push(`/invoices?search=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
+
   return (
     <header
       className={cn(
@@ -43,26 +58,33 @@ export function Navbar() {
 
         {/* Primary nav */}
         <nav className="hidden items-center gap-1 md:flex">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                item.active
-                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                  : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-50"
-              )}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const isActive =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname?.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                    : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-50"
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Spacer */}
         <div className="ml-auto flex items-center gap-2">
           {/* Search */}
-          <label
+          <form
+            onSubmit={handleSearchSubmit}
             className={cn(
               "hidden items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5",
               "text-sm text-zinc-500 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20",
@@ -72,13 +94,15 @@ export function Navbar() {
             <Search className="h-4 w-4" />
             <input
               type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search invoices, vendors…"
               className="w-48 bg-transparent text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-50"
             />
             <kbd className="hidden rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 lg:inline dark:border-zinc-800 dark:bg-zinc-950">
-              ⌘K
+              ↵
             </kbd>
-          </label>
+          </form>
 
           {/* Notifications */}
           <button

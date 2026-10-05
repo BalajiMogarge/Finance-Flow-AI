@@ -128,6 +128,23 @@ export function UploadResultPanel({ result, onDismiss }: Props) {
         </button>
       </header>
 
+      {result.is_duplicate && (
+        <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-300">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>Duplicate detected:</strong> This invoice matches an existing record in the system.
+          </span>
+        </div>
+      )}
+
+      {result.is_ephemeral && (
+        <div className="mx-6 mt-3 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
+          <span>
+            Storage: Ephemeral local disk. File may not persist across service restarts.
+          </span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-3">
         {/* Decision */}
         <div className="space-y-3">

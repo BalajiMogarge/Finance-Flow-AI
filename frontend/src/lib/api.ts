@@ -1,10 +1,8 @@
 /**
  * Typed client for the Finance Flow AI FastAPI backend.
  *
- * The dashboard lives on a different port (3000/3001) and the API
- * runs on 8000, so every call targets an absolute URL. A single
- * ``API_BASE`` constant makes it trivial to point the dashboard at a
- * staging environment without combing through the components.
+ * Supports authentication, file uploads (images + digital PDFs),
+ * human-review queues, audit trails, and paginated queries.
  */
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(
@@ -13,9 +11,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").re
 );
 
 // ---------------------------------------------------------------------------
-// Types — kept close to the FastAPI schemas in ``app/main.py`` and
-// ``app/models.py``. Optional fields are modelled with ``| null`` so the
-// rendering code can degrade gracefully when OCR doesn't recover a value.
+// Types
 // ---------------------------------------------------------------------------
 
 export type InvoiceDecision =
@@ -34,6 +30,22 @@ export type InvoiceRow = {
   decision: InvoiceDecision | null;
   confidence: number | null;
   risk_level: "LOW" | "MEDIUM" | "HIGH" | null;
+  is_duplicate?: boolean;
+  storage_type?: string;
+  is_ephemeral?: boolean;
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  created_at: string | null;
+};
+
+export type AuditLogEntry = {
+  id: number;
+  action: string;
+  previous_state: string | null;
+  new_state: string | null;
+  notes: string | null;
+  user_id: number | null;
   created_at: string | null;
 };
 
@@ -76,17 +88,53 @@ export type DecisionResult = {
 };
 
 export type UploadResponse = {
+  id?: number;
   filename: string;
-  saved_to?: string;
   status: "uploaded" | "processed";
+  is_duplicate?: boolean;
+  file_hash?: string;
+  storage_type?: string;
+  is_ephemeral?: boolean;
   ocr?: Record<string, unknown>;
   fields?: ExtractedFields;
   validation?: ValidationResult;
   decision?: DecisionResult;
 };
 
+export type UserProfile = {
+  id: number;
+  email: string;
+  full_name: string | null;
+  role: string;
+  organization_id?: number | null;
+  organization_name?: string | null;
+};
+
 // ---------------------------------------------------------------------------
-// Fetch helpers
+// Token Management
+// ---------------------------------------------------------------------------
+
+const TOKEN_KEY = "finance_flow_auth_token";
+
+export function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token: string): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(TOKEN_KEY, token);
+  }
+}
+
+export function clearStoredToken(): void {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch Helpers
 // ---------------------------------------------------------------------------
 
 export class ApiError extends Error {
@@ -102,18 +150,23 @@ export class ApiError extends Error {
 }
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getStoredToken();
+  const authHeaders: Record<string, string> = {};
+  if (token) {
+    authHeaders["Authorization"] = `Bearer ${token}`;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers: {
         Accept: "application/json",
+        ...authHeaders,
         ...(init?.headers ?? {}),
       },
     });
   } catch (cause) {
-    // Network failures (backend down, CORS, DNS) land here. Surface a
-    // clear message rather than a raw ``TypeError``.
     throw new ApiError(
       0,
       "Could not reach the Finance Flow AI backend. Is it running on :8000?",
@@ -129,11 +182,11 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
         detail = String((body as { detail: unknown }).detail);
       }
     } catch {
-      // ignore — the response wasn't JSON; we'll just use the status text
+      // response wasn't JSON
     }
     throw new ApiError(
       response.status,
-      `Request failed (${response.status})`,
+      detail ?? `Request failed (${response.status})`,
       detail,
     );
   }
@@ -142,19 +195,36 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Endpoint wrappers
+// Endpoint Wrappers
 // ---------------------------------------------------------------------------
 
 export function fetchStats(): Promise<StatsResponse> {
   return jsonFetch<StatsResponse>("/stats");
 }
 
-export function fetchInsights(): Promise<InsightsResponse> {
-  return jsonFetch<InsightsResponse>("/insights");
+export function fetchInsights(days?: number): Promise<InsightsResponse> {
+  const qs = days ? `?days=${days}` : "";
+  return jsonFetch<InsightsResponse>(`/insights${qs}`);
 }
 
-export function fetchInvoices(): Promise<InvoiceRow[]> {
-  return jsonFetch<InvoiceRow[]>("/invoices");
+export type InvoicesQuery = {
+  decision?: string;
+  search?: string;
+  is_duplicate?: boolean;
+  page?: number;
+  page_size?: number;
+};
+
+export function fetchInvoices(params?: InvoicesQuery): Promise<InvoiceRow[]> {
+  const query = new URLSearchParams();
+  if (params?.decision) query.set("decision", params.decision);
+  if (params?.search) query.set("search", params.search);
+  if (params?.is_duplicate !== undefined) query.set("is_duplicate", String(params.is_duplicate));
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.page_size) query.set("page_size", String(params.page_size));
+
+  const qs = query.toString();
+  return jsonFetch<InvoiceRow[]>(`/invoices${qs ? `?${qs}` : ""}`);
 }
 
 export function uploadInvoice(file: File): Promise<UploadResponse> {
@@ -164,4 +234,24 @@ export function uploadInvoice(file: File): Promise<UploadResponse> {
     method: "POST",
     body: formData,
   });
+}
+
+export function reviewInvoice(
+  invoiceId: number,
+  decision: "APPROVE" | "REJECT",
+  notes?: string,
+): Promise<{ id: number; decision: string; risk_level: string; review_notes?: string }> {
+  return jsonFetch(`/invoices/${invoiceId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, notes }),
+  });
+}
+
+export function fetchAuditTrail(invoiceId: number): Promise<AuditLogEntry[]> {
+  return jsonFetch<AuditLogEntry[]>(`/invoices/${invoiceId}/audit`);
+}
+
+export function fetchCurrentUser(): Promise<UserProfile> {
+  return jsonFetch<UserProfile>("/auth/me");
 }

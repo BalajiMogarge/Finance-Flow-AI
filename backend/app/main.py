@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 import asyncio
@@ -534,6 +534,7 @@ def invoice_stats(
 
 @app.get("/insights")
 def invoice_insights(
+    days: Optional[int] = None,
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_user),
 ):
@@ -541,6 +542,10 @@ def invoice_insights(
     base_q = db.query(Invoice)
     if user and user.organization_id is not None:
         base_q = base_q.filter(Invoice.organization_id == user.organization_id)
+
+    if days and days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        base_q = base_q.filter(Invoice.created_at >= cutoff)
 
     total = base_q.count()
     if total == 0:
