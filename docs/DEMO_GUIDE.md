@@ -1,57 +1,60 @@
-# Demo & Deployment Guide — Finance Flow AI
+# Finance Flow AI — Interactive Demo Walkthrough
 
-This guide explains how to deploy the Finance Flow AI platform and how to use it for a demo.
-
-## 🚀 Deployment Architecture
-
-The project consists of two separate layers that must be hosted differently.
-
-### 1. Frontend (Next.js)
-**Host:** Vercel (Recommended)
-The frontend is a static-site generated (SSG) / server-side rendered (SSR) app. It can be deployed directly from GitHub to Vercel.
-
-**Environment Variables:**
-In the Vercel Dashboard, go to **Settings** $\rightarrow$ **Environment Variables** and add:
-- `NEXT_PUBLIC_API_URL`: The absolute URL of your deployed backend (e.g., `https://finance-flow-api.onrender.com`).
-
-### 2. Backend (FastAPI)
-**Host:** Render, Railway, or AWS/GCP (NOT Vercel)
-The backend **cannot** be deployed to Vercel for the following reasons:
-- **PyTorch/EasyOCR Size**: The AI models and dependencies (like PyTorch) exceed Vercel's serverless function size limits.
-- **Persistent Storage**: The application uses a SQLite database (`finance_flow.db`) and an `uploads/` folder. Vercel's filesystem is read-only and ephemeral; all data would be lost on every request.
-
-**Recommended Setup (Render/Railway):**
-1. Create a new Web Service.
-2. Connect your GitHub repo.
-3. Set the build command: `pip install -r backend/requirements.txt`.
-4. Set the start command: `uvicorn backend.app.main:app --host 0.0.0.0 --port 10000`.
-5. **Crucial**: Attach a **Persistent Disk** to `/app/backend` (or the root folder) so that `finance_flow.db` and the `uploads/` folder persist across restarts.
+This guide provides an end-to-end walkthrough for demonstrating Finance Flow AI's production capabilities.
 
 ---
 
-## 🎤 How to use for a Demo
+## 🚀 Key Talking Points
 
-To showcase the platform's capabilities, follow these steps:
+1. **Deterministic Rule Engine:** Approvals, rejections, and review queue flags are governed by 100% deterministic tax arithmetic and GSTIN checksum validation—not stochastic LLM hallucinations.
+2. **Dual-Engine Ingestion:** High-speed digital PDF text extraction via `pypdf` paired with PyTorch/EasyOCR for scanned raster images, optimized to run reliably within Render's 512 MB memory boundary.
+3. **Enterprise Audit & Compliance:** Built-in duplicate invoice detection (SHA-256 content hashing), human-in-the-loop review queues, and tamper-evident audit trails.
+4. **Production Persistence:** PostgreSQL schema managed via Alembic migrations, with transparent support for durable object storage (AWS S3 / Cloudflare R2).
 
-### Step 1: The Dashboard Overview
-- Open the deployed website.
-- Point out the **Key Metrics** (Total, Approved, etc.) and the **AI Insights** section.
-- Explain that these are derived in real-time from the processed invoice database.
+---
 
-### Step 2: The AI Pipeline (The "Magic")
-- Click "Upload Invoices" or drag-and-drop a sample invoice image (PNG/JPG).
-- **What's happening behind the scenes:**
-    1. **OCR**: EasyOCR reads the image.
-    2. **Extraction**: Regex-based logic pulls out the Vendor, Invoice #, GSTIN, and Amounts.
-    3. **Validation**: The system checks if the arithmetic matches (Subtotal + Tax = Total).
-    4. **Decision**: The AI assigns a risk level and an outcome (APPROVE / REJECT / PENDING).
+## 🎤 Step-by-Step Demo Script
 
-### Step 3: Inspecting Results
-- Once the upload is "Done", look at the **Upload Result Panel**.
-- Show the extracted fields and the **Validation Errors/Warnings**.
-- Point out the **Confidence Score** (how sure the AI is about the text).
+### Step 1: Dashboard Overview
+* Navigate to the root URL `/`.
+* Highlight the **Key Metrics** cards (Total Invoices, Approved, Pending Review, Rejected). These counters reflect live database records.
+* Point out the **AI Insights** panel (top vendor spend, approval rate percentage, and verification accuracy computed dynamically from invoice records).
 
-### Step 4: Data Persistence
-- Scroll down to the **Recent Invoices** table.
-- Show that the newly uploaded invoice has been persisted to the database and now appears in the history.
-- Note that the **AI Insights** and **Stats Cards** have updated automatically.
+### Step 2: Uploading Invoices & Dual-Engine Processing
+* Drag-and-drop or select a sample invoice:
+  * **Test Case A (Digital PDF):** Upload a digital PDF. Point out the instant extraction speed ($< 500$ ms) and zero OCR latency.
+  * **Test Case B (High-Fidelity Image):** Upload a sample PNG/JPEG. The backend runs OCR within the concurrency semaphore, downscaling if oversized.
+* Inspect the **Upload Result Panel**:
+  * Show extracted fields: Vendor Name, Invoice Number, GSTIN, Date, Subtotal, CGST, SGST, and Total.
+  * Show the validation breakdown: GSTIN format and mod-36 checksum, and tax math verification ($\text{Subtotal} + \text{CGST} + \text{SGST} = \text{Total}$).
+  * Show the deterministic decision and risk badge (`APPROVE` / `LOW`, `REJECT` / `HIGH`, or `PENDING REVIEW` / `MEDIUM`).
+
+### Step 3: Duplicate Invoice Detection
+* Re-upload the exact same invoice file.
+* Observe that the system flags **Duplicate detected**:
+  * The file hash matches an existing record in the database.
+  * The result panel displays the warning banner.
+  * The invoice is flagged as `is_duplicate: true` to prevent fraudulent double-payments.
+
+### Step 4: The Invoices Directory & Filter Tabs
+* Click **Invoices** in the top navigation bar (or navigate to `/invoices`).
+* Demonstrate the tab filters:
+  * **All Invoices:** Complete historical ledger.
+  * **Review Queue:** Invoices requiring human attention (`PENDING REVIEW`).
+  * **Approved:** High-confidence reconciled invoices.
+  * **Rejected:** Invoices failing compliance or tax math.
+  * **Duplicates:** Filtered ledger of flagged duplicate submissions.
+* Test the search bar: type a vendor name or invoice number (e.g. `Acme`) and observe real-time filtering.
+
+### Step 5: Human Review & Audit Trail
+* Click on the **Review Queue** tab.
+* Find an invoice marked `PENDING REVIEW` and click **Review**.
+* Enter an auditor note (e.g., *"Manually verified supplier GST portal filing. Approved for disbursement."*) and click **Approve Invoice**.
+* Notice that the invoice status immediately updates to `Approved` with `LOW` risk.
+* Click the **History** (clock) button on the invoice row to open the **Audit Trail Modal**:
+  * Show the chronological event history:
+    1. `UPLOAD_PROCESSED`: Automated system ingestion and initial decision.
+    2. `HUMAN_REVIEW`: Auditor decision, timestamp, and audit notes.
+
+### Step 6: Navigation & Settings
+* Check the **Vendors**, **Reports**, and **Settings** tabs in the navbar to showcase the integrated module structure and system configuration.

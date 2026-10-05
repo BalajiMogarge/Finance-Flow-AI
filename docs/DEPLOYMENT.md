@@ -1,183 +1,97 @@
-# Deployment Guide
+# Finance Flow AI — Production Deployment Guide
 
-This document covers deploying Finance Flow AI:
-
-* **Frontend → Vercel** (Next.js 15 App Router)
-* **Backend → Render** (FastAPI + Uvicorn)
-* **Storage → SQLite** (development) with a note on production-ready
-  alternatives
-
-The two services must be able to reach each other. The backend URL is
-read by the frontend at `UploadCard.tsx:89` — change it (or set an
-environment variable and read it) when you swap environments.
+This guide covers end-to-end production deployment of Finance Flow AI using free and open-source tools:
+* **Frontend:** Next.js 15 on **Vercel** (Hobby Plan)
+* **Backend:** FastAPI on **Render** (Free Web Service)
+* **Database:** Managed PostgreSQL (**Neon**, **Supabase**, or **Render Postgres**)
+* **Object Storage:** Pluggable local ephemeral disk or durable **Cloudflare R2** / **AWS S3**
 
 ---
 
-## 1. Frontend on Vercel
+## 1. Hosting Tier Limitations & Verified Facts (October 2026)
 
-### 1.1 Repository setup
-
-* Push the repository to GitHub.
-* In Vercel, click **Add New → Project** and import the repository.
-* Set **Root Directory** to `frontend/`.
-* Framework preset: **Next.js** (auto-detected).
-
-### 1.2 Build & start commands
-
-Vercel auto-detects these for Next.js, but the canonical commands
-(from `frontend/package.json`) are:
-
-| Action        | Command       |
-| ------------- | ------------- |
-| Build         | `next build`  |
-| Start (prod)  | `next start`  |
-| Dev           | `next dev`    |
-
-### 1.3 Environment variables
-
-The frontend reads `NEXT_PUBLIC_API_URL` as the backend base URL:
-
-| Name            | Example                                  | Purpose                                      |
-| --------------- | ---------------------------------------- | -------------------------------------------- |
-| `NEXT_PUBLIC_API_URL` | `https://finance-flow-api.onrender.com` | Base URL prepended to `/upload` (and future endpoints). |
-
-After changing the source to use the variable, redeploy.
-
-### 1.4 CORS
-
-`backend/app/main.py` lists the allowed CORS origins explicitly. Add
-your Vercel deployment origin (e.g. `https://finance-flow-ai.vercel.app`)
-to the `allow_origins` list and redeploy the backend.
-
-### 1.5 Common Vercel errors and fixes
-
-| Symptom | Likely cause | Fix |
-| ------- | ------------ | --- |
-| Build fails with `Module not found: Can't resolve '@/lib/cn'` | `tsconfig.json` paths not picked up | Confirm `"baseUrl"` / `"paths": {"@/*": ["./src/*"]}` is present (it already is). |
-| Upload requests target localhost | `NEXT_PUBLIC_API_URL` is unset | Set `NEXT_PUBLIC_API_URL` to the deployed backend URL and redeploy. |
-| `CORS policy: No 'Access-Control-Allow-Origin'` | Backend not redeployed with the Vercel origin | Add the origin to `allow_origins` in `main.py` and redeploy Render. |
+| Provider & Tier | Limits & Behavior | Solution / Architecture in Finance Flow AI |
+| :--- | :--- | :--- |
+| **Render Web Service (Free)** | 512 MB RAM, 0.1 vCPU, 15m inactivity spin-down, ephemeral disk. | PyTorch/EasyOCR concurrency is limited to 1 via `asyncio.Semaphore(1)`. Images are downscaled to 1600px. Digital PDFs bypass OCR via `pypdf`. |
+| **Render PostgreSQL (Free)** | 1 GB storage, **expires and shuts down after 30 days**. | For permanent production persistence, use a permanent free PostgreSQL tier such as **Neon Serverless Postgres** (0.5 GB permanent) or **Supabase** (500 MB permanent). Set `DATABASE_URL`. |
+| **Render Filesystem (Free)** | Ephemeral. Uploaded files do not survive redeploys or restarts. | The backend exposes `is_ephemeral` so callers are aware of file status. For durable storage, set `STORAGE_BACKEND=s3` pointing to Cloudflare R2 (10 GB free) or AWS S3. |
+| **Vercel Hobby Plan** | 60-second max function timeout, 250 MB bundle limit. | Next.js build is optimized with standalone tracing (`outputFileTracingRoot`). Static export & CSR utilized for instant responsiveness. |
 
 ---
 
-## 2. Backend on Render
+## 2. Environment Variables Reference
 
-### 2.1 Service setup
+### 2.1 Backend Environment Variables (Render)
 
-* In Render, click **New → Web Service** and connect the repository.
-* **Root Directory:** `backend`.
-* **Runtime:** Python 3.
-* **Build Command:** `pip install -r requirements.txt`
-  (see [§2.3](#23-build-commands)).
-* **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+| Variable | Required | Default | Description |
+| :--- | :---: | :--- | :--- |
+| `DATABASE_URL` | **Yes** | `sqlite:///finance_flow.db` | PostgreSQL connection string (`postgresql://user:pass@host/db`). Render's legacy `postgres://` format is automatically converted. |
+| `SECRET_KEY` | **Yes** (Prod) | `finance-flow-ai-development-...` | Cryptographic secret for signing PyJWT access tokens. Use `openssl rand -hex 32`. |
+| `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:3001` | Comma-delimited list of allowed frontend origins (e.g. `https://finance-flow-ai.vercel.app`). |
+| `CORS_ORIGIN_REGEX` | No | `^https://.*\.vercel\.app$` | Regex allowing all Vercel production and preview deployment URLs. |
+| `STORAGE_BACKEND` | No | `local` | `local` for disk storage or `s3` for durable object storage. |
+| `MAX_UPLOAD_BYTES` | No | `10485760` (10 MB) | Maximum upload file size guard in bytes. |
+| `OCR_CONCURRENCY_LIMIT`| No | `1` | Max concurrent OCR inferences. Keeps RAM $< 512$ MB. |
+| `OCR_MAX_IMAGE_DIM` | No | `1600` | Max width or height for raster images before downscaling. |
+| `S3_ENDPOINT_URL` | If `s3` | `None` | S3 endpoint URL (e.g., `https://<account-id>.r2.cloudflarestorage.com`). |
+| `S3_BUCKET_NAME` | If `s3` | `None` | Name of the S3 / R2 bucket. |
+| `S3_ACCESS_KEY_ID` | If `s3` | `None` | S3 API access key. |
+| `S3_SECRET_ACCESS_KEY` | If `s3` | `None` | S3 secret access key. |
+| `S3_REGION` | If `s3` | `auto` | Bucket region (`auto`, `us-east-1`, etc.). |
 
-### 2.2 Environment variables
+### 2.2 Frontend Environment Variables (Vercel)
 
-| Name              | Example                                | Purpose                                                        |
-| ----------------- | -------------------------------------- | -------------------------------------------------------------- |
-| `PYTHON_VERSION`  | `3.11.9`                               | Pin the Python version. EasyOCR's wheels work on 3.9–3.12.    |
-| `PORT`            | `10000`                                | Render injects this automatically.                             |
-| `WEB_CONCURRENCY` | `1`                                    | OCR is memory-heavy; keep at 1 unless you have measured headroom. |
-
-### 2.3 Build commands
-
-The repository ships `backend/requirements.txt`. Install it with:
-
-```
-fastapi
-uvicorn[standard]
-python-multipart
-easyocr
-numpy
-pillow
-pytest
-httpx
-```
-
-> **Cold starts.** EasyOCR downloads model weights (~100 MB) on the
-> first request after a cold start, which can take 30–60 seconds.
-> Render free-tier instances sleep between requests; budget for this
-> latency.
-
-### 2.4 Start command
-
-```
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-### 2.5 Persistent storage
-
-The backend writes uploads to `backend/uploads/`. **On Render free and
-standard tiers this filesystem is ephemeral** — uploaded files
-disappear on every redeploy or instance recycle. For real persistence,
-attach a Render Persistent Disk and point `UPLOAD_DIR` at it:
-
-```python
-# in app/main.py
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-```
-
-Then set `UPLOAD_DIR=/var/data/uploads` in the Render dashboard.
-
-### 2.6 Common Render errors and fixes
-
-| Symptom | Likely cause | Fix |
-| ------- | ------------ | --- |
-| Build fails: `ERROR: Could not build wheels for easyocr` | Python version too new or wheels missing | Pin `PYTHON_VERSION=3.11.x`. EasyOCR's official wheels top out at Python 3.12. |
-| `ModuleNotFoundError: No module named 'app.main'` | Start command run from repo root | Set **Root Directory** to `backend`. |
-| First request times out at 60 s | EasyOCR downloading weights on cold start | Keep one warm ping (Render "Cron Job" hitting `/health` every 5 min), or upgrade to a plan that never sleeps. |
-| `OSError: [Errno 28] No space left on device` | Uploads/ accumulating in ephemeral disk | Switch `UPLOAD_DIR` to a persistent disk and add a retention job. |
-| `CORS policy: No 'Access-Control-Allow-Origin'` | Vercel origin not in `allow_origins` | Add it to `main.py` and redeploy. |
-| `RuntimeError: Form data requires "python-multipart"` | Missing dependency | Add `python-multipart` to `requirements.txt`. |
+| Variable | Required | Example | Description |
+| :--- | :---: | :--- | :--- |
+| `NEXT_PUBLIC_API_URL` | **Yes** | `https://finance-flow-api.onrender.com` | Public base URL of your deployed FastAPI backend (no trailing slash). |
 
 ---
 
-## 3. SQLite persistence
+## 3. Ordered Deployment Steps
 
-The application uses a SQLite database (`finance_flow.db`) for storing processed invoices and generating analytics.
+### Step 1: Provision Persistent Database
+1. Create a free PostgreSQL instance on **Neon** (`https://neon.tech`), **Supabase** (`https://supabase.com`), or Render.
+2. Copy the connection string (`postgresql://<user>:<password>@<host>/<database>?sslmode=require`).
 
-* **Location:** The database is stored in the `backend/` root.
-* **Persistence on Render:** Since Render's filesystem is ephemeral, you **must** attach a Render Persistent Disk to the root of your backend service (or a specific data folder) to ensure that your invoices and statistics are not lost upon redeployment.
-* **Concurrency:** SQLite serialises writes. For this reason, keep `WEB_CONCURRENCY=1` in your Render environment variables.
-* **Backups:** Persistent disks on Render can be snapshotted to prevent data loss.
+### Step 2: Deploy Backend on Render
+1. Connect your GitHub repository to Render.
+2. Click **New + → Blueprint** to deploy using the included [`render.yaml`](../render.yaml), OR select **New Web Service**:
+   * **Root Directory:** `backend`
+   * **Runtime:** `Python 3`
+   * **Build Command:** `pip install --upgrade pip && pip install -r requirements.txt && alembic upgrade head`
+   * **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`
+   * **Plan:** Free
+3. Add Environment Variables:
+   * `DATABASE_URL`: Your Postgres connection string.
+   * `SECRET_KEY`: A secure random 64-character hex string.
+   * `STORAGE_BACKEND`: `local` (or `s3` if using R2/S3).
+4. Deploy and verify health check: `https://<your-service>.onrender.com/health`.
 
-For production environments with higher traffic or multiple worker replicas, it is recommended to migrate to a managed PostgreSQL instance (available via Render) and update the `DATABASE_URL` in `backend/app/database.py`.
+### Step 3: Deploy Frontend on Vercel
+1. In Vercel, import the GitHub repository.
+2. Configure Project:
+   * **Root Directory:** `frontend`
+   * **Framework Preset:** `Next.js`
+   * **Build Command:** `next build` (auto-detected)
+   * **Output Directory:** `.next` (auto-detected)
+3. Under **Environment Variables**, add:
+   * `NEXT_PUBLIC_API_URL` = `https://<your-service>.onrender.com`
+4. Click **Deploy**.
 
 ---
 
-## 4. End-to-end deployment checklist
+## 4. Database Migrations
 
-- [ ] Repository pushed to GitHub
-- [ ] `backend/requirements.txt` created and committed
-- [ ] Vercel project created, root = `frontend/`
-- [ ] `NEXT_PUBLIC_API_URL` set in Vercel (after `UploadCard.tsx`
-      is updated to read it)
-- [ ] Render Web Service created, root = `backend/`
-- [ ] `PYTHON_VERSION` pinned in Render
-- [ ] Vercel origin added to `allow_origins` in `main.py` and pushed
-- [ ] Persistent disk attached and `UPLOAD_DIR` pointed at it
-- [ ] Smoke test: `curl https://<backend>.onrender.com/health` returns
-      `{"status":"healthy"}`
-- [ ] Upload an invoice from the deployed frontend and confirm the
-      decision comes back
+Finance Flow AI manages schema changes via **Alembic**. Database creation at application import time has been removed to prevent race conditions during horizontal scaling.
 
----
-
-## 5. Local "deploy" rehearsal
-
-Before going live, exercise the production wiring locally:
-
+To execute migrations locally or in CI/CD:
 ```bash
-# Terminal 1 — backend
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Terminal 2 — frontend
-cd frontend
-npm install
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 npm run dev
+alembic upgrade head
 ```
 
-Open `http://localhost:3000`, upload `backend/sample_invoice.png`,
-and confirm the full pipeline returns a decision.
+To create a new migration after updating `app/models.py`:
+```bash
+alembic revision --autogenerate -m "describe_changes"
+alembic upgrade head
+```

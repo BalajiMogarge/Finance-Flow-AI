@@ -1,113 +1,133 @@
-# API Reference
+# Finance Flow AI — API Reference (v2.0.0)
 
-The Finance Flow AI backend exposes a small REST API implemented in
-**FastAPI**. All routes are defined in `backend/app/main.py`. The
-service binds to `http://0.0.0.0:8000` by default and CORS is
-configured to accept the Next.js dev server on `localhost:3000`,
-`localhost:3001`, `127.0.0.1:3000`, and `127.0.0.1:3001`.
-
-> **Scope note.** `/health`, `/upload`, `/invoices`, and `/stats` are
-> implemented in `main.py`.
+The Finance Flow AI backend is built with **FastAPI**. All operational endpoints are exposed with deterministic rules, RBAC security, rate-limiting, and comprehensive audit tracking.
 
 ---
 
-## Conventions
+## Base Conventions
 
-* **Base URL (local dev):** `http://127.0.0.1:8000`
-* **Content type:** `application/json` unless noted.
-* **Errors:** FastAPI's default error envelope is used
-  (`{"detail": "..."}`). The backend does not currently expose a
-  custom error schema.
-* **CORS:** allowed origins are listed in
-  [ARCHITECTURE.md](./ARCHITECTURE.md#technology-stack).
+* **Default Local Port:** `http://127.0.0.1:8000`
+* **Default Production:** `https://<render-service-name>.onrender.com`
+* **Content Type:** `application/json` (except `POST /upload` which accepts `multipart/form-data`)
+* **Authentication:** Bearer token via `Authorization: Bearer <JWT>` header (optional for unauthenticated demo mode, mandatory for organization-scoped operations).
+* **Rate Limits:**
+  * General API: 120 requests/minute per client IP.
+  * File Upload: 30 requests/minute per client IP.
+  * HTTP status on violation: `429 Too Many Requests` with `Retry-After` header.
 
 ---
 
-## Endpoints
+## Authentication Endpoints
 
-### `GET /health`
+### `POST /auth/register`
+Create a new user and associate with an existing or new organization.
 
-| Aspect      | Value                                                      |
-| ----------- | ---------------------------------------------------------- |
-| Method      | `GET`                                                      |
-| URL         | `/health`                                                  |
-| Purpose     | Liveness probe. Returns a static `{"status": "healthy"}`. |
-
-#### Request body
-
-None.
-
-#### Example request
-
-```http
-GET /health HTTP/1.1
-Host: 127.0.0.1:8000
-```
-
-#### Example response — `200 OK`
-
+* **Request Body:**
 ```json
 {
-  "status": "healthy"
+  "email": "auditor@company.com",
+  "password": "StrongPassword123!",
+  "full_name": "Jane Auditor",
+  "role": "reviewer",
+  "organization_name": "Acme Global"
+}
+```
+* **Response `200 OK`:**
+```json
+{
+  "id": 1,
+  "email": "auditor@company.com",
+  "full_name": "Jane Auditor",
+  "role": "reviewer",
+  "organization_id": 1
+}
+```
+* **Errors:**
+  * `400 Bad Request`: Email already registered.
+
+---
+
+### `POST /auth/login`
+Authenticate and obtain a signed PyJWT bearer token. Supports both JSON body and OAuth2 form data.
+
+* **Request Body (JSON):**
+```json
+{
+  "email": "auditor@company.com",
+  "password": "StrongPassword123!"
+}
+```
+* **Response `200 OK`:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "token_type": "bearer",
+  "expires_in": 86400
+}
+```
+* **Errors:**
+  * `401 Unauthorized`: Invalid credentials.
+
+---
+
+### `GET /auth/me`
+Retrieve the current authenticated user's profile and organization.
+
+* **Headers:** `Authorization: Bearer <token>`
+* **Response `200 OK`:**
+```json
+{
+  "id": 1,
+  "email": "auditor@company.com",
+  "full_name": "Jane Auditor",
+  "role": "reviewer",
+  "organization_id": 1,
+  "organization_name": "Acme Global"
 }
 ```
 
-#### Error responses
-
-None. This endpoint does not raise under normal operation.
-
 ---
 
+## Invoice Operations
+
 ### `POST /upload`
+Upload an invoice image or digital PDF. Executes magic-byte validation, duplicate hashing, OCR / digital extraction, validation rules, and deterministic decision engine.
 
-| Aspect      | Value                                                                       |
-| ----------- | --------------------------------------------------------------------------- |
-| Method      | `POST`                                                                      |
-| URL         | `/upload`                                                                   |
-| Purpose     | Accept an invoice file, run OCR + extraction + validation + decision, and return the result. |
-| Consumes    | `multipart/form-data` (`file` field)                                       |
-| Produces    | `application/json`                                                          |
-
-#### Request body
-
-A single multipart field named `file` containing the invoice. Files
-with image extensions recognised by EasyOCR
-(`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff`) are
-processed end-to-end. Any other extension is still accepted but is
-returned with `status: "uploaded"` and no OCR data.
-
-> The frontend currently advertises support for
-> `["pdf", "png", "jpg", "jpeg", "webp"]` in
-> `UploadCard.tsx`. PDF is not yet implemented server-side — PDF
-> uploads will land in this branch with `status: "uploaded"`.
-
-#### Response body — image upload
-
-`200 OK`
-
+* **Headers:** `Content-Type: multipart/form-data`
+* **Form Field:** `file` (binary payload)
+* **Supported Formats:**
+  * Digital PDF (`.pdf`, signature `%PDF-`) — extracted directly via `pypdf` bypassing OCR.
+  * Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tiff`) — processed via PyTorch/EasyOCR with memory downscaling.
+* **Size Limit:** Max 10 MB (`MAX_UPLOAD_BYTES`).
+* **Response `200 OK`:**
 ```json
 {
-  "filename": "invoice-001.png",
-  "saved_to": "uploads/invoice-001.png",
+  "id": 42,
+  "filename": "invoice_1024.pdf",
+  "saved_to": "uploads/a1b2c3d4.pdf",
+  "storage_type": "local",
+  "is_ephemeral": true,
+  "file_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "is_duplicate": false,
   "status": "processed",
   "ocr": {
     "lines": [
-      { "text": "Invoice #INV-10248", "confidence": 0.96 },
-      { "text": "Total: 1180.00",    "confidence": 0.91 }
+      { "text": "Invoice #INV-2026-001", "confidence": 0.98 },
+      { "text": "Total: ₹45,000.00", "confidence": 0.96 }
     ],
-    "text": "Invoice #INV-10248\nTotal: 1180.00",
-    "average_confidence": 0.935,
+    "text": "Invoice #INV-2026-001\nTotal: ₹45,000.00",
+    "average_confidence": 0.97,
     "line_count": 2
   },
   "fields": {
-    "invoice_number": "INV-10248",
-    "vendor": "ACME Pvt Ltd",
-    "date": "2026-08-20",
-    "gstin": "22AAAAA0000A1Z0",
-    "subtotal": 1000.0,
-    "cgst": 90.0,
-    "sgst": 90.0,
-    "total": 1180.0
+    "invoice_number": "INV-2026-001",
+    "vendor": "Acme Logistics",
+    "date": "2026-09-15",
+    "gstin": "27AABCU9603R1ZM",
+    "subtotal": 38135.59,
+    "cgst": 3432.20,
+    "sgst": 3432.20,
+    "total": 45000.00
   },
   "validation": {
     "passed": true,
@@ -116,100 +136,153 @@ returned with `status: "uploaded"` and no OCR data.
   },
   "decision": {
     "decision": "APPROVE",
-    "confidence": 0.935,
+    "confidence": 0.97,
     "reason": "Invoice passed all validation checks with high OCR confidence.",
     "risk_level": "LOW"
   }
 }
 ```
+* **Error Responses:**
+  * `413 Content Too Large`: File exceeds 10 MB limit.
+  * `415 Unsupported Media Type`: File magic bytes do not match valid image or PDF signatures.
+  * `429 Too Many Requests`: Upload rate limit exceeded (30 req/min).
 
-#### Response body — non-image upload (e.g. PDF)
+---
 
-`200 OK`
+### `GET /invoices`
+List stored invoices, sorted newest-first, with filtering and pagination.
 
+* **Query Parameters:**
+  * `decision`: Filter by decision outcome (`APPROVE`, `REJECT`, `PENDING REVIEW`).
+  * `search`: Case-insensitive substring match against `invoice_number`, `vendor`, or `filename`.
+  * `is_duplicate`: Boolean (`true` or `false`) to filter duplicate flags.
+  * `page`: Page index (default: `1`, 1-indexed).
+  * `page_size`: Number of records per page (default: `50`, max: `100`).
+* **Response `200 OK`:** Array of invoice summaries:
+```json
+[
+  {
+    "id": 42,
+    "filename": "invoice_1024.pdf",
+    "vendor": "Acme Logistics",
+    "invoice_number": "INV-2026-001",
+    "gstin": "27AABCU9603R1ZM",
+    "total": 45000.0,
+    "decision": "APPROVE",
+    "confidence": 0.97,
+    "risk_level": "LOW",
+    "is_duplicate": false,
+    "storage_type": "local",
+    "is_ephemeral": true,
+    "created_at": "2026-10-06T00:30:00Z",
+    "reviewed_by": null,
+    "reviewed_at": null,
+    "review_notes": null
+  }
+]
+```
+
+---
+
+### `POST /invoices/{id}/review`
+Submit a human review for an invoice in the `PENDING REVIEW` queue. Creates an immutable entry in the audit trail.
+
+* **Headers:** `Authorization: Bearer <token>` (Recommended)
+* **Request Body:**
 ```json
 {
-  "filename": "invoice-001.pdf",
-  "saved_to": "uploads/invoice-001.pdf",
-  "status": "uploaded"
+  "decision": "APPROVE",
+  "notes": "Verified GST portal registration manually. Supplier cleared."
+}
+```
+* **Response `200 OK`:**
+```json
+{
+  "id": 42,
+  "decision": "APPROVE",
+  "risk_level": "LOW",
+  "reviewed_by": "auditor@company.com",
+  "reviewed_at": "2026-10-06T00:35:00Z",
+  "review_notes": "Verified GST portal registration manually. Supplier cleared."
+}
+```
+* **Errors:**
+  * `400 Bad Request`: Decision must be either `APPROVE` or `REJECT`.
+  * `404 Not Found`: Invoice not found.
+
+---
+
+### `GET /invoices/{id}/audit`
+Fetch the chronological, tamper-evident audit history of an invoice.
+
+* **Response `200 OK`:**
+```json
+[
+  {
+    "id": 101,
+    "action": "UPLOAD_PROCESSED",
+    "performed_by": "system",
+    "previous_state": null,
+    "new_state": "PENDING REVIEW",
+    "notes": "Automated OCR extraction completed. Reason: Missing optional invoice date.",
+    "created_at": "2026-10-06T00:30:00Z"
+  },
+  {
+    "id": 102,
+    "action": "HUMAN_REVIEW",
+    "performed_by": "auditor@company.com",
+    "previous_state": "PENDING REVIEW",
+    "new_state": "APPROVE",
+    "notes": "Verified GST portal registration manually. Supplier cleared.",
+    "created_at": "2026-10-06T00:35:00Z"
+  }
+]
+```
+
+---
+
+## Analytics & Health
+
+### `GET /stats`
+Return all-time counts for key metrics.
+
+* **Response `200 OK`:**
+```json
+{
+  "total": 128,
+  "approved": 98,
+  "rejected": 14,
+  "pending": 16
 }
 ```
 
-#### `decision` field reference
+---
 
-| Value             | Risk level | Meaning                                                                  |
-| ----------------- | ---------- | ------------------------------------------------------------------------ |
-| `APPROVE`         | `LOW`      | Validation passed, no warnings, OCR confidence ≥ 0.85.                   |
-| `REJECT`          | `HIGH`     | Invalid GSTIN, missing invoice number, amount inconsistency, or OCR confidence < 0.40. |
-| `PENDING REVIEW`  | `MEDIUM`   | Policy warning, mid-range confidence, or missing optional fields.        |
+### `GET /insights`
+Return AI spend intelligence, top vendors, and accuracy metrics. Supports optional time-window filtering.
 
-#### Example request — cURL
-
-```bash
-curl -X POST http://127.0.0.1:8000/upload \
-  -F "file=@./sample_invoice.png"
+* **Query Parameters:**
+  * `days`: Optional positive integer (e.g., `?days=30` to filter the last 30 days).
+* **Response `200 OK`:**
+```json
+{
+  "top_vendor": "Acme Logistics",
+  "approval_rate": 76.6,
+  "high_value_count": 8,
+  "accuracy": 87.5
+}
 ```
 
-#### Example request — JavaScript (browser)
-
-```js
-const form = new FormData();
-form.append("file", file);
-
-const res = await fetch("http://127.0.0.1:8000/upload", {
-  method: "POST",
-  body: form,
-});
-const json = await res.json();
-```
-
-#### Error responses
-
-| Status | When                                                                | Body shape                  |
-| ------ | ------------------------------------------------------------------- | --------------------------- |
-| `500`  | EasyOCR fails to read the file (e.g. corrupt image, missing model). | `{"detail": "OCR failed for <name>: <reason>"}` |
-
-There is no documented 4xx response path; missing-file requests are
-rejected by FastAPI's standard `422 Unprocessable Entity` validation
-with a body like `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
-
 ---
 
-### `GET /invoices` *(planned — not yet implemented)*
+### `GET /health`
+Liveness and readiness probe for container orchestrators and monitoring.
 
-| Aspect      | Value                                                          |
-| ----------- | -------------------------------------------------------------- |
-| Method      | `GET`                                                          |
-| URL         | `/invoices`                                                    |
-| Purpose     | List previously processed invoices.                            |
-| Status      | **Not implemented** in the current `main.py`. The frontend's `Navbar` links to `/invoices` but no route exists yet. |
-
-Once the database is added this endpoint will return rows persisted
-from previous `POST /upload` calls.
-
----
-
-### `GET /stats` *(planned — not yet implemented)*
-
-| Aspect      | Value                                                                       |
-| ----------- | --------------------------------------------------------------------------- |
-| Method      | `GET`                                                                       |
-| URL         | `/stats`                                                                    |
-| Purpose     | Aggregate metrics for the dashboard's `StatsCards` component.               |
-| Status      | **Not implemented** — the dashboard currently renders hard-coded numbers from `src/lib/dummy-data.ts`. |
-
-The intended response will mirror the `Stat` type in
-`src/lib/dummy-data.ts` (`label`, `value`, `delta`, `trend`,
-`iconName`).
-
----
-
-## Quick smoke test
-
-```bash
-# 1. Health check
-curl http://127.0.0.1:8000/health
-
-# 2. Upload a sample invoice (provided in the repo)
-curl -X POST http://127.0.0.1:8000/upload -F "file=@backend/sample_invoice.png"
+* **Response `200 OK`:**
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "storage": "local"
+}
 ```

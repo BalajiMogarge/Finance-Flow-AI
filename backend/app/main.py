@@ -248,8 +248,11 @@ async def upload_invoice(
     written = 0
     while chunk := await file.read(UPLOAD_CHUNK_SIZE):
         written += len(chunk)
-        if written > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="Upload exceeds the 10 MB limit.")
+        if written > settings.MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"Upload exceeds the maximum allowed size of {settings.MAX_UPLOAD_BYTES} bytes.",
+            )
         content_chunks.append(chunk)
 
     await file.close()
