@@ -7,7 +7,7 @@ The Finance Flow AI backend is built with **FastAPI**. All operational endpoints
 ## Base Conventions
 
 * **Default Local Port:** `http://127.0.0.1:8000`
-* **Default Production:** `https://<render-service-name>.onrender.com`
+* **Default Production:** `https://finance-flow-ai-backend.onrender.com`
 * **Content Type:** `application/json` (except `POST /upload` which accepts `multipart/form-data`)
 * **Authentication:** Bearer token via `Authorization: Bearer <JWT>` header (optional for unauthenticated demo mode, mandatory for organization-scoped operations).
 * **Rate Limits:**

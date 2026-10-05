@@ -20,6 +20,8 @@ import os
 import sys
 import types
 import unittest
+import tempfile
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -147,6 +149,12 @@ class PersistenceTestBase(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[database.get_db] = _override_get_db
+        # Isolate uploads directory so tests don't leave files in backend/uploads
+        from app.config import settings
+        self._temp_dir = tempfile.mkdtemp()
+        self._orig_upload_dir = settings.UPLOAD_DIR
+        settings.UPLOAD_DIR = Path(self._temp_dir)
+
         self._app = app
         self.client = TestClient(app)
 
@@ -155,10 +163,14 @@ class PersistenceTestBase(unittest.TestCase):
         database.engine = self._original_engine
         database.SessionLocal = self._original_session
         from app import main as main_module
+        from app.config import settings
 
         main_module.engine = self._original_main_engine
         self.test_engine.dispose()
         app.dependency_overrides.pop(database.get_db, None)
+        settings.UPLOAD_DIR = self._orig_upload_dir
+        if hasattr(self, "_temp_dir") and Path(self._temp_dir).exists():
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
         if TEST_DB_PATH.exists():
             TEST_DB_PATH.unlink()
 

@@ -240,10 +240,48 @@ class UploadEndpointTests(unittest.TestCase):
             sys.modules["easyocr"] = easyocr_stub
 
         from fastapi.testclient import TestClient
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        import tempfile
+        import shutil
 
+        from app.database import Base, get_db
+        from app.config import settings
         from app.main import app
 
+        self._temp_dir = tempfile.mkdtemp()
+        self._orig_upload_dir = settings.UPLOAD_DIR
+        settings.UPLOAD_DIR = Path(self._temp_dir)
+
+        self._test_engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=self._test_engine)
+        self._TestingSessionLocal = sessionmaker(bind=self._test_engine)
+
+        def _override_get_db():
+            db = self._TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = _override_get_db
         self.client = TestClient(app)
+
+    def tearDown(self):
+        from app.main import app
+        from app.database import get_db
+        from app.config import settings
+        import shutil
+
+        app.dependency_overrides.pop(get_db, None)
+        settings.UPLOAD_DIR = self._orig_upload_dir
+        if hasattr(self, "_temp_dir") and Path(self._temp_dir).exists():
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
 
     def _stub_ocr(self, confidence: float = 0.95):
         return {

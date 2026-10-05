@@ -51,9 +51,19 @@ def client(test_db):
     app.dependency_overrides[get_db] = override_get_db
     # Clear rate limit sliding windows before tests
     upload_rate_limiter.history.clear()
-    api_rate_limiter.history.clear()
+    import tempfile
+    import shutil
+    from app.config import settings
+
+    temp_dir = tempfile.mkdtemp()
+    orig_upload_dir = settings.UPLOAD_DIR
+    settings.UPLOAD_DIR = Path(temp_dir)
+
     with TestClient(app) as c:
         yield c
+
+    settings.UPLOAD_DIR = orig_upload_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
     app.dependency_overrides.clear()
 
 

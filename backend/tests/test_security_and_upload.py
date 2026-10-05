@@ -61,10 +61,23 @@ class SecurityAndUploadTests(unittest.TestCase):
             finally:
                 db.close()
 
-        app.dependency_overrides[database.get_db] = _override_get_db
+        # Isolate upload dir
+        import tempfile
+        from app.config import settings
+        self._temp_dir = tempfile.mkdtemp()
+        self._orig_upload_dir = settings.UPLOAD_DIR
+        settings.UPLOAD_DIR = Path(self._temp_dir)
+
         self.client = TestClient(app)
 
     def tearDown(self):
+        import shutil
+        from app.config import settings
+
+        settings.UPLOAD_DIR = self._orig_upload_dir
+        if hasattr(self, "_temp_dir") and Path(self._temp_dir).exists():
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
         database.engine = self._orig_engine
         self.test_engine.dispose()
         app.dependency_overrides.pop(database.get_db, None)
