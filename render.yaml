@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: finance-flow-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        fromDatabase:
+          name: finance-flow-db
+          property: connectionString
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://finance-flow-ai.vercel.app,http://localhost:3000,http://localhost:3001"
+      - key: CORS_ORIGIN_REGEX
+        value: "^https://.*\\.vercel\\.app$"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: STORAGE_BACKEND
+        value: local
+      - key: OCR_CONCURRENCY_LIMIT
+        value: "1"
+      - key: OCR_MAX_IMAGE_DIM
+        value: "1600"
+
+databases:
+  # Note: Render free tier PostgreSQL instances expire 30 days after creation.
+  # For permanent free tier deployments, connect an external free Postgres instance
+  # (e.g. Neon.tech serverless Postgres) by overriding DATABASE_URL in Render environment settings.
+  - name: finance-flow-db
+    plan: free
+    region: oregon
+    databaseName: finance_flow
+    user: finance_flow_user

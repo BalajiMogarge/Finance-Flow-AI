@@ -1,48 +1,54 @@
+from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
+import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, get_db
+from .config import settings
+from .database import Base, engine, get_db, init_db
 from .decision import make_decision
 from .extractor import extract_invoice_fields
 from .models import Invoice
-from .ocr import image_to_text
+from .ocr import _ocr_semaphore, image_to_text
 from .validator import validate_invoice
+from .storage import get_storage_provider
 
-# Ensure the schema exists before the first request comes in. This is
-# cheap and idempotent so it's safe to call at import time.
-Base.metadata.create_all(bind=engine)
+# MIME types / extensions that EasyOCR can read directly.
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
-app = FastAPI()
 
-# Allow the Next.js frontend to talk to FastAPI.
-# The dashboard runs on :3001 and also fetches via 127.0.0.1:8000, so both
-# loopback origins are permitted.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan handler to ensure database schema and upload storage exist on startup."""
+    init_db()
+    settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(
+    title="Finance Flow AI API",
+    description="AI-powered invoice verification, extraction, and reconciliation platform.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS configuration supporting environment-defined origins and Vercel domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Folder where uploaded invoices will be stored.
-UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-# MIME types / extensions that EasyOCR can read directly.
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-UPLOAD_CHUNK_SIZE = 1024 * 1024
+UPLOAD_DIR = settings.UPLOAD_DIR
+MAX_UPLOAD_BYTES = settings.MAX_UPLOAD_BYTES
 
 
 def _display_filename(filename: str | None) -> str:
@@ -56,14 +62,22 @@ def _save_invoice(
     filename: str | None,
     fields: dict,
     decision_result: dict,
+    storage_key: str | None = None,
+    storage_type: str = "local",
+    is_ephemeral: bool = False,
+    file_hash: str | None = None,
+    is_duplicate: bool = False,
+    organization_id: int | None = None,
 ) -> Invoice:
-    """Persist the processed invoice and return the saved row.
-
-    Pulled out of ``/upload`` so it can be unit-tested independently
-    and so the route handler stays focused on the HTTP concerns.
-    """
+    """Persist the processed invoice and return the saved row."""
     record = Invoice(
         filename=filename,
+        storage_key=storage_key,
+        storage_type=storage_type,
+        is_ephemeral=is_ephemeral,
+        file_hash=file_hash,
+        is_duplicate=is_duplicate,
+        organization_id=organization_id,
         vendor=fields.get("vendor"),
         invoice_number=fields.get("invoice_number"),
         gstin=fields.get("gstin"),
@@ -76,6 +90,12 @@ def _save_invoice(
     db.commit()
     db.refresh(record)
     return record
+
+
+async def _run_ocr(path: Path) -> dict:
+    """Run OCR in a worker thread under the semaphore to avoid blocking the event loop."""
+    async with _ocr_semaphore:
+        return await asyncio.to_thread(image_to_text, path)
 
 
 @app.get("/health")
@@ -117,11 +137,11 @@ async def upload_invoice(
     }
 
     try:
-        ocr_result = image_to_text(file_path)
+        ocr_result = await _run_ocr(file_path)
         fields = extract_invoice_fields(ocr_result)
         validation = validate_invoice(fields)
         decision = make_decision(validation, fields, ocr_result.get("average_confidence"))
-        _save_invoice(db, filename, fields, decision)
+        _save_invoice(db, filename, fields, decision, storage_key=file_path.name)
         response["ocr"] = ocr_result
         response["fields"] = fields
         response["validation"] = validation
@@ -136,11 +156,7 @@ async def upload_invoice(
 
 @app.get("/invoices")
 def list_invoices(db: Session = Depends(get_db)):
-    """Return processed invoices, newest first.
-
-    Only the fields the dashboard renders are included so the payload
-    stays small. The shape mirrors the example in the task brief.
-    """
+    """Return processed invoices, newest first."""
     rows = (
         db.query(Invoice)
         .order_by(Invoice.created_at.desc(), Invoice.id.desc())
@@ -165,12 +181,7 @@ def list_invoices(db: Session = Depends(get_db)):
 
 @app.get("/stats")
 def invoice_stats(db: Session = Depends(get_db)):
-    """Return dashboard counters derived from the invoices table.
-
-    ``total`` is the number of stored invoices. ``approved``,
-    ``rejected`` and ``pending`` count rows by their decision value
-    (case-insensitive — OCR pipelines sometimes flip the casing).
-    """
+    """Return dashboard counters derived from the invoices table."""
     total = db.query(func.count(Invoice.id)).scalar() or 0
 
     def _count(matcher) -> int:
@@ -197,10 +208,7 @@ def invoice_stats(db: Session = Depends(get_db)):
 
 @app.get("/insights")
 def invoice_insights(db: Session = Depends(get_db)):
-    """Return high-level AI insights based on historical invoice data.
-
-    Calculates top vendor, approval rate, and verification accuracy.
-    """
+    """Return high-level AI insights based on historical invoice data."""
     total = db.query(func.count(Invoice.id)).scalar() or 0
     if total == 0:
         return {

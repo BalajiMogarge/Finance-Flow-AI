@@ -1,58 +1,33 @@
-"""SQLite persistence for Finance Flow AI.
+"""Database persistence for Finance Flow AI.
 
-This module wires up a single SQLAlchemy ``Engine`` and a configured
-``sessionmaker`` for the rest of the application. The database file
-lives at the project root as ``finance_flow.db`` so that the FastAPI
-process and the test suite can both connect to it without any extra
-configuration.
-
-A small :func:`get_db` helper is exposed for FastAPI dependency
-injection — the same pattern used by the FastAPI documentation. Tests
-that don't go through ``TestClient`` can call :func:`SessionLocal``
-directly and remember to close the session when they're done.
+Configures SQLAlchemy engine and session factory with support for PostgreSQL
+and SQLite, reading connection strings dynamically from the environment.
+Includes connection pooling, thread safety, and explicit schema initialization.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from .config import settings
 
-# ---------------------------------------------------------------------------
-# Engine
-# ---------------------------------------------------------------------------
+# Engine configuration: SQLite needs check_same_thread=False;
+# PostgreSQL uses pooling and pre-ping to handle reconnects gracefully.
+_connect_args = {"check_same_thread": False} if settings.IS_SQLITE else {}
 
-# Resolve the SQLite file relative to the backend package so the path is
-# stable regardless of the working directory the server is launched from.
-_BACKEND_ROOT = Path(__file__).resolve().parent.parent
-DATABASE_URL = f"sqlite:///{(_BACKEND_ROOT / 'finance_flow.db').as_posix()}"
-
-# ``check_same_thread=False`` lets the same connection be used across
-# FastAPI's thread pool. SQLAlchemy's pool still serialises access for
-# SQLite, which is exactly what we want for a single-writer workload.
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    settings.DATABASE_URL,
+    connect_args=_connect_args,
+    pool_pre_ping=True,
     future=True,
 )
 
-
-# ---------------------------------------------------------------------------
-# Declarative base
-# ---------------------------------------------------------------------------
 
 class Base(DeclarativeBase):
     """Common declarative base shared by every ORM model."""
 
 
-# ---------------------------------------------------------------------------
-# Session factory
-# ---------------------------------------------------------------------------
-
-# ``autoflush=False`` keeps intermediate state visible in tests and lets
-# the route handlers control when changes hit the database.
 SessionLocal = sessionmaker(
     bind=engine,
     autoflush=False,
@@ -61,19 +36,17 @@ SessionLocal = sessionmaker(
 )
 
 
-# ---------------------------------------------------------------------------
-# FastAPI dependency
-# ---------------------------------------------------------------------------
+def init_db() -> None:
+    """Idempotently create tables if they do not exist.
+
+    Invoked explicitly during application lifespan or migrations, avoiding
+    uncontrolled schema mutation at module import time.
+    """
+    Base.metadata.create_all(bind=engine)
+
 
 def get_db() -> Session:
-    """Yield a database session and ensure it is closed afterwards.
-
-    Used as a FastAPI dependency::
-
-        @app.get("/invoices")
-        def list_invoices(db: Session = Depends(get_db)):
-            ...
-    """
+    """Yield a database session and ensure it is closed afterwards."""
     db = SessionLocal()
     try:
         yield db
