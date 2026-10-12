@@ -54,7 +54,7 @@ export function ColdStartBanner() {
         <div className="flex items-center gap-2.5">
           <Loader2 className="h-4 w-4 animate-spin text-amber-700 dark:text-amber-400" />
           <p className="font-medium">
-            <span className="font-semibold">Server is waking up (up to ~60 s)</span> — Hugging Face Space is starting from cold sleep. Requests will automatically retry and process once online.
+            <span className="font-semibold">Server is waking up (up to ~60 s)</span> — Render service is starting from idle sleep. Requests will automatically retry and process once online.
           </p>
         </div>
         <div className="flex items-center gap-2">

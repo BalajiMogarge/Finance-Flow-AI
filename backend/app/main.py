@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     init_db()
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Warm up EasyOCR model at startup
+    # Warm up RapidOCR model at startup
     try:
         init_ocr()
     except Exception as exc:

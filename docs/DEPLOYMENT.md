@@ -1,12 +1,12 @@
 # Finance Flow AI — Production Deployment Guide
 
-This guide details the complete production deployment procedure for Finance Flow AI. Follow each phase in order.
+This guide details the complete production deployment procedure for Finance Flow AI across Neon PostgreSQL, S3 Object Storage, Render (FastAPI Docker), and Vercel (Next.js 15). Follow each phase in order.
 
 ```mermaid
 flowchart LR
-    Step1["1. Neon PostgreSQL\n(Pooled + Direct URLs)"] --> Step2["2. Supabase Storage\n(Private S3 Bucket)"]
-    Step2 --> Step3["3. Hugging Face Space\n(FastAPI Docker Container)"]
-    Step3 --> Step4["4. Vercel\n(Next.js 15 Frontend)"]
+    Step1["1. Neon PostgreSQL\n(Pooled + Direct URLs)"] --> Step2["2. S3 Object Storage\n(Neon / Supabase Storage)"]
+    Step2 --> Step3["3. Render Web Service\n(FastAPI Docker Container)"]
+    Step3 --> Step4["4. Vercel Frontend\n(Next.js 15 App Router)"]
 ```
 
 ---
@@ -15,124 +15,126 @@ flowchart LR
 
 1. **Create Project**:
    - Log into [Neon Console](https://console.neon.tech).
-   - Create a new project (e.g., `finance-flow-prod`).
-2. **Retrieve Connection Strings**:
-   Neon provides two connection strings. You **must** capture both:
+   - Create a project (e.g. `finance-flow-prod`).
+2. **Collect Connection Strings**:
+   Neon provides pooled and unpooled endpoints. You need both:
    - **Pooled URL (`DATABASE_URL`)**:
-     - Toggle connection pooling **ON** in the Neon dashboard.
+     - Toggle Connection Pooling **ON** in the Neon dashboard.
      - The hostname contains `-pooler`:
        ```text
-       postgresql://user:password@ep-cool-snowflake-123456-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
+       postgresql://neondb_owner:PASSWORD@ep-falling-star-b5qy3v1l-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require
        ```
-     - *Used for runtime queries by the FastAPI application.*
+     - *Used for runtime application queries via PgBouncer.*
    - **Direct URL (`DATABASE_URL_DIRECT`)**:
-     - Toggle connection pooling **OFF**.
+     - Toggle Connection Pooling **OFF**.
      - The hostname does **not** contain `-pooler`:
        ```text
-       postgresql://user:password@ep-cool-snowflake-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+       postgresql://neondb_owner:PASSWORD@ep-falling-star-b5qy3v1l.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require
        ```
-     - *Used exclusively by Alembic migrations during container startup.*
+     - *Used by Alembic migrations during container startup.*
 
 ---
 
-## Phase 2: Configure Supabase S3-Compatible Storage
+## Phase 2: Configure S3 Object Storage
 
-1. **Create Bucket**:
-   - Log into [Supabase](https://supabase.com/dashboard).
-   - Navigate to **Storage** $\rightarrow$ **New Bucket**.
-   - Set Name to `invoices`.
-   - **Ensure Public Bucket is OFF (Private Bucket)**.
-2. **Generate S3 Credentials**:
-   - Go to **Project Settings** $\rightarrow$ **Storage** $\rightarrow$ **S3 Access Keys**.
-   - Generate a new S3 Access Key Pair:
-     - `S3_ACCESS_KEY_ID`: Your generated Access Key ID.
-     - `S3_SECRET_ACCESS_KEY`: Your generated Secret Access Key.
-     - `S3_ENDPOINT_URL`: `https://<project-ref>.supabase.co/storage/v1/s3`
-     - `S3_REGION`: Region of your Supabase project (e.g., `us-east-1`).
-     - `S3_BUCKET`: `invoices`
+You can use either Neon Object Storage or Supabase Storage:
+
+### Option A: Neon Object Storage (Recommended)
+1. Initialize via the Neon CLI:
+   ```bash
+   neon config init
+   neon deploy
+   ```
+2. Collect the generated S3 credentials:
+   - `S3_ENDPOINT_URL`: Provided in Neon project storage settings
+   - `S3_REGION`: Same as Neon region (e.g. `us-east-2`)
+   - `S3_ACCESS_KEY_ID`: Your Neon storage access key
+   - `S3_SECRET_ACCESS_KEY`: Your Neon storage secret key
+   - `S3_BUCKET`: `uploads`
+
+### Option B: Supabase Storage
+1. Create a private bucket named `uploads` in Supabase Storage.
+2. In Project Settings $\rightarrow$ Storage $\rightarrow$ S3 Access Keys, generate an S3 Access Key pair.
 
 ---
 
-## Phase 3: Deploy Backend on Hugging Face Spaces
+## Phase 3: Deploy Backend on Render
 
-1. **Create a Space**:
-   - Go to [Hugging Face Spaces](https://huggingface.co/new-space).
-   - Space Name: `finance-flow-ai-backend` (or your preferred name).
-   - License: `mit` or `apache-2.0`.
-   - Select **Docker** SDK.
-   - Hardware: **CPU Basic** (2 vCPU, 16 GB RAM — Free tier).
-2. **Configure Space Settings**:
-   - In Space **Settings** $\rightarrow$ **Variables and Secrets**:
-   - Add the following **Secrets**:
+1. **Create New Web Service**:
+   - Log into [Render Dashboard](https://dashboard.render.com).
+   - Click **New** $\rightarrow$ **Web Service**.
+   - Connect your GitHub repository (`FinanceFlowAI`).
+2. **Service Configuration**:
+   - **Name**: `finance-flow-backend` (or your preferred name)
+   - **Branch**: `render-demo-ready` (or merged production branch)
+   - **Root Directory**: `backend`
+   - **Runtime**: **Docker**
+   - **Instance Type**: **Free** (0.1 CPU, 512 MB RAM)
+3. **Environment Variables**:
+   Under the **Environment** tab, add the following variables:
 
-| Secret Name | Value Description |
+| Variable | Value Description |
 |---|---|
+| `ENVIRONMENT` | `production` |
 | `DATABASE_URL` | Neon pooled connection string (`...-pooler...sslmode=require`) |
 | `DATABASE_URL_DIRECT` | Neon direct connection string (`...sslmode=require`) |
-| `SECRET_KEY` | Strong random string ($\ge 32$ chars, e.g. `openssl rand -hex 32`) |
+| `SECRET_KEY` | 32+ character random secret (e.g. `openssl rand -hex 32`) |
 | `STORAGE_BACKEND` | `s3` |
-| `S3_ENDPOINT_URL` | Supabase S3 endpoint URL |
-| `S3_REGION` | Supabase storage region (e.g. `us-east-1`) |
-| `S3_ACCESS_KEY_ID` | Supabase S3 access key ID |
-| `S3_SECRET_ACCESS_KEY` | Supabase S3 secret access key |
-| `S3_BUCKET` | `invoices` |
-| `FRONTEND_ORIGINS` | `["https://your-frontend.vercel.app"]` |
+| `S3_ENDPOINT_URL` | S3 endpoint URL |
+| `S3_REGION` | S3 bucket region (e.g. `us-east-2`) |
+| `S3_ACCESS_KEY_ID` | S3 access key ID |
+| `S3_SECRET_ACCESS_KEY` | S3 secret access key |
+| `S3_BUCKET` | `uploads` |
+| `FRONTEND_ORIGINS` | `https://your-frontend.vercel.app` (update after Phase 4) |
 | `FRONTEND_PREVIEW_REGEX`| `^https://[a-zA-Z0-9-]+-your-team\.vercel\.app$` |
+| `OCR_CONCURRENCY` | `1` |
 
-3. **Deploy Code**:
-   - **Option A (GitHub Actions)**:
-     Add your `HF_TOKEN` as a repository secret on GitHub. The workflow in `.github/workflows/sync-huggingface.yml` will automatically sync the `backend/` directory to your Space upon push.
-   - **Option B (Direct Git Push)**:
-     ```bash
-     git remote add hf https://huggingface.co/spaces/<your-username>/<your-space-name>
-     git subtree push --prefix backend hf main
-     ```
-4. **Verify Backend Health**:
-   Once the Space build completes:
-   - Visit: `https://<your-space-name>.hf.space/health` $\rightarrow$ should return `{"status": "healthy"}`.
-   - Visit: `https://<your-space-name>.hf.space/health/ready` $\rightarrow$ should return `{"status": "ready", "database": "connected", "ocr_model": "loaded"}`.
+4. **Health Check Path**:
+   - Set **Health Check Path** to `/health`.
+5. **Deploy**:
+   - Click **Create Web Service**. Render builds the Docker image and launches the container.
+   - Note down your Render service URL (e.g. `https://finance-flow-backend.onrender.com`).
 
 ---
 
 ## Phase 4: Deploy Frontend on Vercel
 
-1. **Import Repository**:
+1. **Import Project**:
    - Log into [Vercel](https://vercel.com).
-   - Click **Add New Project** $\rightarrow$ import your Git repository.
-2. **Project Settings**:
-   - Framework Preset: **Next.js**.
-   - Root Directory: `frontend`.
+   - Click **Add New** $\rightarrow$ **Project** $\rightarrow$ import your repository.
+2. **Configure Settings**:
+   - Framework Preset: **Next.js**
+   - Root Directory: `frontend`
 3. **Environment Variables**:
-   Add the following environment variable in Vercel:
+   Add the following environment variable:
 
-| Variable Name | Environment | Value |
+| Variable | Environment | Value |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | Production, Preview | `https://<your-space-name>.hf.space` |
+| `NEXT_PUBLIC_API_URL` | Production, Preview | `https://finance-flow-backend.onrender.com` |
 
-> **Critical**: Do not include trailing slashes in `NEXT_PUBLIC_API_URL`.
+> **Important**: Do not include a trailing slash in `NEXT_PUBLIC_API_URL`.
 
 4. **Deploy**:
-   - Click **Deploy**. Vercel will execute `npm run build` and launch the frontend.
+   - Click **Deploy**. Vercel will build and deploy Next.js 15.
 5. **Update Backend CORS**:
-   - Copy your production Vercel URL (e.g. `https://finance-flow-ai.vercel.app`).
-   - In Hugging Face Space settings, update the `FRONTEND_ORIGINS` secret to include this exact domain:
-     ```text
-     ["https://finance-flow-ai.vercel.app"]
-     ```
+   - Copy your assigned Vercel URL (e.g. `https://finance-flow-ai.vercel.app`).
+   - In Render dashboard, update `FRONTEND_ORIGINS` to include this URL.
 
 ---
 
 ## Phase 5: Verification & Smoke Test Checklist
 
-- [ ] Open frontend production URL in browser.
-- [ ] Confirm no cold-start warning remains once backend is awake.
-- [ ] Sign up or log into an organization account.
-- [ ] Upload a digital invoice (`sample_digital_standard.pdf`):
-  - Ingestion returns 202 Accepted.
-  - Processing completes in $< 2$ seconds via fast-path.
-  - Extracted fields, GSTIN verification, and arithmetic consistency pass.
-- [ ] Upload a scanned receipt (`sample_scanned_receipt.png`):
-  - Ingestion processes via CPU EasyOCR fallback.
-  - Verification decision completes and reflects in dashboard.
-- [ ] Click **View Original** on an invoice and verify the presigned S3 URL opens the document securely.
-- [ ] Perform a human review approval/rejection with notes on a pending invoice and confirm the action is recorded in the audit trail.
+- [ ] **Liveness**: Visit `https://your-backend.onrender.com/health` $\rightarrow$ `{"status": "healthy"}`.
+- [ ] **Readiness**: Visit `https://your-backend.onrender.com/health/ready` $\rightarrow$ `{"status": "ready", "database": "connected", "ocr_model": "loaded"}`.
+- [ ] **Frontend Load**: Open your Vercel URL in a browser; verify no UI console errors.
+- [ ] **Cold-Start Banner**: If Render was asleep, confirm the banner shows *"Server is waking up (up to ~60 s)"* and disappears automatically once online.
+- [ ] **User Sign-In**: Log in with your organization user account.
+- [ ] **Digital PDF Ingestion**: Upload `samples/sample_digital_standard.pdf`.
+  - Ingestion returns `202 Accepted` immediately.
+  - Processing completes via `pypdf` fast-path within 2 seconds.
+  - Checksum, arithmetic balance, and decision reflect `APPROVE`.
+- [ ] **Scanned Image Ingestion**: Upload `samples/sample_scanned_receipt.png`.
+  - Processing completes via RapidOCR ONNX fallback.
+  - Verification decision updates in dashboard.
+- [ ] **Presigned Storage Access**: Click **View Document**; confirm presigned S3 URL opens the document securely.
+- [ ] **Human Review**: Test approving/rejecting a pending invoice with review notes; verify audit log updates.

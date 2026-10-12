@@ -10,12 +10,11 @@ from unittest.mock import patch
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi.testclient import TestClient
-
 from app import database
 from app.auth import hash_password, verify_password
 from app.database import Base
 from app.main import app
+from fastapi.testclient import TestClient
 
 TEST_DB_PATH = BACKEND_DIR / "test_security.db"
 TEST_DATABASE_URL = f"sqlite:///{TEST_DB_PATH.as_posix()}"

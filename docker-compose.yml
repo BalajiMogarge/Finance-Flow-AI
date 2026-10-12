@@ -5,8 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: finance-flow-backend
     ports:
-      - "7860:7860"
+      - "8000:8000"
     environment:
+      - PORT=8000
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://finance_flow_user:finance_flow_pass@db:5432/finance_flow
       - DATABASE_URL_DIRECT=postgresql://finance_flow_user:finance_flow_pass@db:5432/finance_flow

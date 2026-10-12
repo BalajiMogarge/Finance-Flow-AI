@@ -2,7 +2,7 @@
 
 Ensures uploaded files match their claimed extension and do not conceal malicious
 payloads. Provides lightweight, high-performance digital PDF text extraction
-via pypdf, completely bypassing heavy PyTorch inference when digital text is present.
+via pypdf, completely bypassing optical OCR inference when digital text is present.
 """
 
 from __future__ import annotations

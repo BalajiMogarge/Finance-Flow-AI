@@ -1,7 +1,7 @@
-"""End-to-end verification script for port 7860 FastAPI service.
+"""End-to-end verification script for port 8000 FastAPI service.
 
 Tests:
-1. Server launch on port 7860.
+1. Server launch on port 8000.
 2. GET /health and GET /health/ready.
 3. POST /api/invoices with digital PDF (sample_digital_standard.pdf) -> verify 202 -> poll until completed.
 4. POST /api/invoices with scanned PNG (sample_scanned_receipt.png) -> verify 202 -> poll until completed.
@@ -18,7 +18,7 @@ import json
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLES_DIR = ROOT / "samples"
-PORT = 7860
+PORT = 8000
 BASE_URL = f"http://127.0.0.1:{PORT}"
 
 env = os.environ.copy()
@@ -156,7 +156,7 @@ try:
         print(f"\nPaginated listing items count: {len(listing['items'])}, total: {listing['total']}")
         assert listing["total"] >= 2, "Expected at least 2 invoices"
 
-    print("\nALL PORT 7860 VERIFICATIONS PASSED SUCCESSFULLY!")
+    print("\nALL PORT 8000 VERIFICATIONS PASSED SUCCESSFULLY!")
 
 finally:
     print("Terminating Uvicorn process...")

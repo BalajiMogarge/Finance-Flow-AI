@@ -24,7 +24,7 @@ export default function SettingsPage() {
               Backend API & Engine
             </h2>
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              FastAPI backend running with deterministic rules engine and PyTorch/EasyOCR optimization.
+              FastAPI backend running with deterministic rules engine and lightweight RapidOCR (ONNX) optimization.
             </p>
             <div className="mt-4 rounded-lg bg-zinc-50 p-3 text-xs font-mono text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
               Status: Connected (v2.0.0)

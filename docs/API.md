@@ -2,8 +2,8 @@
 
 The Finance Flow AI backend is powered by FastAPI, exposing REST endpoints with JSON payloads, multipart uploads, JWT Bearer authentication, and rate limiting.
 
-- **Base URL (Local)**: `http://localhost:7860`
-- **Base URL (Production)**: `https://<your-space-name>.hf.space`
+- **Base URL (Local)**: `http://localhost:8000`
+- **Base URL (Production)**: `https://<your-service>.onrender.com`
 - **Interactive OpenAPI Documentation**: `GET /docs` (Swagger UI) or `GET /redoc` (ReDoc)
 
 ---

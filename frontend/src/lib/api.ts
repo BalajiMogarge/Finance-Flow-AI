@@ -15,10 +15,10 @@ export function getApiBase(): string {
     if (process.env.NODE_ENV === "production") {
       throw new Error(
         "CRITICAL: NEXT_PUBLIC_API_URL environment variable is missing in production. " +
-        "Configure NEXT_PUBLIC_API_URL pointing to your Hugging Face Space backend (e.g. https://your-space.hf.space)."
+        "Configure NEXT_PUBLIC_API_URL pointing to your backend (e.g. https://your-service.onrender.com)."
       );
     }
-    return "http://127.0.0.1:7860";
+    return "http://127.0.0.1:8000";
   }
   return envUrl.replace(/\/+$/, "");
 }

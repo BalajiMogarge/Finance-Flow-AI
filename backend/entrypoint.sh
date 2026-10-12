@@ -15,5 +15,6 @@ else
     echo "DATABASE_URL not set; skipping Alembic migration."
 fi
 
-echo "Starting Uvicorn server on 0.0.0.0:7860..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 7860 --workers 1
+APP_PORT="${PORT:-8000}"
+echo "Starting Uvicorn server on 0.0.0.0:$APP_PORT..."
+exec uvicorn app.main:app --host 0.0.0.0 --port "$APP_PORT" --workers 1

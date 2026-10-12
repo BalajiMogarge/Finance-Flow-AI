@@ -199,7 +199,7 @@ class UploadEndpointTests(unittest.TestCase):
     def setUp(self):
         # Imported lazily so the unit tests above don't pay the cost
         # of loading FastAPI. We also stub out the heavy OCR
-        # dependencies (numpy / easyocr) at import time — the tests
+        # dependencies (numpy / rapidocr) at import time — the tests
         # only need ``image_to_text`` to be patchable, never executed.
         import sys
         import types
@@ -224,29 +224,28 @@ class UploadEndpointTests(unittest.TestCase):
             pil_stub.Image = image_stub  # type: ignore[attr-defined]
             sys.modules["PIL"] = pil_stub
             sys.modules["PIL.Image"] = image_stub
-        if "easyocr" not in sys.modules:
-            easyocr_stub = types.ModuleType("easyocr")
+        if "rapidocr_onnxruntime" not in sys.modules:
+            rapidocr_stub = types.ModuleType("rapidocr_onnxruntime")
 
-            class _Reader:
+            class _RapidOCR:
                 def __init__(self, *args, **kwargs):
                     pass
 
-                def readtext(self, image, detail=1, paragraph=False):
-                    return []
+                def __call__(self, img):
+                    return None, None
 
-            easyocr_stub.Reader = _Reader  # type: ignore[attr-defined]
-            sys.modules["easyocr"] = easyocr_stub
+            rapidocr_stub.RapidOCR = _RapidOCR  # type: ignore[attr-defined]
+            sys.modules["rapidocr_onnxruntime"] = rapidocr_stub
 
         import tempfile
-
-        from fastapi.testclient import TestClient
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.pool import StaticPool
 
         from app.config import settings
         from app.database import Base, get_db
         from app.main import app
+        from fastapi.testclient import TestClient
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
 
         self._temp_dir = tempfile.mkdtemp()
         self._orig_upload_dir = settings.UPLOAD_DIR

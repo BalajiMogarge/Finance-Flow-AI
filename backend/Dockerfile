@@ -1,36 +1,32 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# System configuration and performance
+# System configuration and low-memory performance tuning
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    EASYOCR_MODULE_PATH=/app/models/easyocr \
-    PORT=7860
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    PORT=8000
 
-# Install OpenCV and PyTorch runtime dependencies
+# Install runtime dependencies for ONNX runtime and container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 \
-    libglib2.0-0 \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user (uid 1000 required for Hugging Face Spaces)
+# Create non-root user (uid 1000)
 RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-# Upgrade pip and install CPU-only PyTorch
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
 # Install application dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Pre-download EasyOCR model weights into fixed directory at BUILD time
-RUN mkdir -p /app/models/easyocr && \
-    python -c "import easyocr; easyocr.Reader(['en'], gpu=False, model_storage_directory='/app/models/easyocr', verbose=True)"
+# Pre-download and cache RapidOCR model weights at BUILD time so container starts instantly
+RUN python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR()"
 
 # Copy application source
 COPY . /app
@@ -41,6 +37,6 @@ RUN chmod +x /app/entrypoint.sh && \
 
 USER 1000
 
-EXPOSE 7860
+EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     OCR_CONCURRENCY: int = Field(default=1, description="Maximum concurrent OCR jobs")
     OCR_MAX_IMAGE_DIM: int = Field(default=1600, description="Max width/height before downscaling image")
     OCR_TIMEOUT_SECONDS: int = Field(default=90, description="Hard timeout per OCR job in seconds")
-    EASYOCR_MODULE_PATH: str | None = Field(default=None, description="Path to pre-downloaded EasyOCR model weights")
 
     @property
     def IS_SQLITE(self) -> bool:

@@ -21,7 +21,7 @@ import sys
 import tempfile
 import types
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,18 +56,18 @@ def _install_stubs() -> None:
         pil_stub.Image = image_stub  # type: ignore[attr-defined]
         sys.modules["PIL"] = pil_stub
         sys.modules["PIL.Image"] = image_stub
-    if "easyocr" not in sys.modules:
-        easyocr_stub = types.ModuleType("easyocr")
+    if "rapidocr_onnxruntime" not in sys.modules:
+        rapidocr_stub = types.ModuleType("rapidocr_onnxruntime")
 
-        class _Reader:
+        class _RapidOCR:
             def __init__(self, *args, **kwargs):
                 pass
 
-            def readtext(self, image, detail=1, paragraph=False):
-                return []
+            def __call__(self, img):
+                return None, None
 
-        easyocr_stub.Reader = _Reader  # type: ignore[attr-defined]
-        sys.modules["easyocr"] = easyocr_stub
+        rapidocr_stub.RapidOCR = _RapidOCR  # type: ignore[attr-defined]
+        sys.modules["rapidocr_onnxruntime"] = rapidocr_stub
 
 
 _install_stubs()
@@ -75,12 +75,11 @@ _install_stubs()
 
 # Imports must come AFTER the stubs are in place so that ``app.main``
 # doesn't try to import the real (heavy) OCR packages at import time.
-from fastapi.testclient import TestClient
-
 from app import database
 from app.database import Base
 from app.main import app
 from app.models import Invoice
+from fastapi.testclient import TestClient
 
 # Path to the test-only SQLite file. Lives next to the package so the
 # test database is easy to find and to delete.
@@ -213,7 +212,7 @@ class InvoicesListTests(PersistenceTestBase):
     def _seed(self) -> list[Invoice]:
         """Insert three invoices with controlled timestamps."""
         # Use distinct timestamps so the ordering is deterministic.
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with database.SessionLocal() as session:
             rows = [
                 Invoice(
