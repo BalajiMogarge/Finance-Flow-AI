@@ -1,246 +1,139 @@
-"""Final approve/reject decision for an invoice.
+"""Deterministic rule-based decision engine for invoice approvals.
 
-Given the validation output, the extracted fields and the OCR average
-confidence, :func:`make_decision` returns one of three outcomes:
+Evaluates validation output, extracted fields, and OCR confidence:
+- APPROVE: All validation checks pass, no policy warnings, OCR confidence >= 0.85.
+- PENDING REVIEW: Confidence in [0.40, 0.85), soft policy warnings (e.g. total >= 200,000 INR),
+  or missing optional fields.
+- REJECT: Hard failures (missing invoice_number, invalid GSTIN checksum / bad state code,
+  arithmetic mismatch > 1.00 INR), or OCR confidence < 0.40.
 
-* ``APPROVE`` — invoice passed every validation rule, has no warnings
-  and was OCR'd with high confidence.
-* ``REJECT`` — invoice has a hard failure (invalid GSTIN, missing
-  invoice number, amount inconsistency) or OCR confidence is too low
-  to trust the extracted values.
-* ``PENDING REVIEW`` — invoice has a soft warning (e.g. company policy
-  flag) or confidence is in the grey zone and a human should look at
-  it before paying.
-
-The shape of the returned dict matches what the ``/upload`` endpoint
-emits to the frontend.
+Zero LLM in the approval path — decisions are 100% deterministic and auditable.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
+from .validator import amounts_consistent, validate_gstin_checksum
 
-# ---------------------------------------------------------------------------
-# Thresholds — keep them in one place so they can be tweaked by ops without
-# hunting through the rule logic below.
-# ---------------------------------------------------------------------------
-
-# OCR average_confidence must be at least this to auto-approve.
+# Decision boundary thresholds
 APPROVE_CONFIDENCE = 0.85
-# Below this, the document is too noisy to trust at all and gets rejected.
 REJECT_CONFIDENCE = 0.40
 
 
-# ---------------------------------------------------------------------------
-# Rule helpers
-# ---------------------------------------------------------------------------
-
-# Indian GSTIN checksum. Implements the Luhn-style algorithm defined by
-# the GSTN. Returns ``True`` when the checksum is valid. We do not
-# require every digit to be uppercase here — caller is responsible for
-# upper-casing the value before calling.
 def _gstin_checksum_is_valid(gstin: str) -> bool:
-    if not gstin or len(gstin) != 15:
-        return False
-    chars = gstin.upper()
-    if not chars[:14].isalnum() or not chars[14].isalnum():
-        return False
+    """Validate 15-character GSTIN checksum (returns bool)."""
+    valid, _ = validate_gstin_checksum(gstin)
+    return valid
 
-    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    total = 0
-    # GSTN applies the first multiplier at the right-hand side of the
-    # 14-character body. Iterating left-to-right therefore starts at 1.
-    factor = 1
-    for ch in chars[:14]:
-        product = alphabet.index(ch) * factor
-        total += (product // 36) + (product % 36)
-        factor = 1 if factor == 2 else 2
-
-    expected = alphabet[(36 - (total % 36)) % 36]
-    return chars[14] == expected
-
-
-def _is_valid_gstin(value: Optional[str]) -> bool:
-    """True if ``value`` looks like a real 15-character GSTIN."""
-    if not value:
-        return False
-    if not isinstance(value, str):
-        return False
-    if len(value) != 15:
-        return False
-    return _gstin_checksum_is_valid(value)
-
-
-def _collect_warnings(validation: dict[str, Any]) -> list[str]:
-    """Return the list of soft warnings emitted by validation."""
-    return list(validation.get("warnings", []) or [])
-
-
-def _collect_errors(validation: dict[str, Any]) -> list[str]:
-    """Return the list of hard errors emitted by validation."""
-    return list(validation.get("errors", []) or [])
-
-
-def _amounts_are_consistent(fields: dict[str, Any]) -> bool:
-    """True if subtotal + cgst + sgst matches the total within 1 rupee.
-
-    A small tolerance is used because OCR frequently drops the last
-    paisa on rounded totals. We only check the arithmetic when all four
-    numbers were actually extracted.
-    """
-    subtotal = fields.get("subtotal")
-    cgst = fields.get("cgst")
-    sgst = fields.get("sgst")
-    total = fields.get("total")
-
-    if None in (subtotal, cgst, sgst, total):
-        return True  # not enough info — let validation flag missing fields
-
-    try:
-        computed = float(subtotal) + float(cgst) + float(sgst)
-    except (TypeError, ValueError):
-        return False
-    return abs(computed - float(total)) <= 1.0
-
-
-def _missing_optional_fields(fields: dict[str, Any]) -> list[str]:
-    """List of optional fields that are absent — drives PENDING REVIEW."""
-    optional = ["vendor", "date", "gstin"]
-    return [name for name in optional if not fields.get(name)]
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
 
 def make_decision(
     validation: dict[str, Any],
     fields: dict[str, Any],
-    confidence: Optional[float],
+    confidence: float | None,
 ) -> dict[str, Any]:
-    """Decide whether an invoice should be APPROVED, REJECTED or PENDING REVIEW.
+    """Decide whether an invoice should be APPROVED, REJECTED, or PENDING REVIEW.
 
-    Parameters
-    ----------
-    validation:
-        Output of the validation stage. Expected keys: ``passed`` (bool),
-        ``errors`` (list[str]) and ``warnings`` (list[str]).
-    fields:
-        Extracted invoice fields as returned by ``extract_invoice_fields``.
-    confidence:
-        Average OCR confidence in the range ``[0, 1]``. ``None`` is
-        treated as zero.
+    Parameters:
+        validation: output of validate_invoice
+        fields: extracted invoice fields
+        confidence: average OCR confidence [0.0, 1.0]
 
-    Returns
-    -------
-    dict
-        ``{"decision", "confidence", "reason", "risk_level"}``.
+    Returns:
+        dict: {"decision": str, "confidence": float, "reason": str, "risk_level": str}
     """
     validation = validation or {}
     fields = fields or {}
     try:
-        confidence_value = float(confidence) if confidence is not None else 0.0
+        confidence_val = float(confidence) if confidence is not None else 0.0
     except (TypeError, ValueError):
-        confidence_value = 0.0
+        confidence_val = 0.0
 
-    errors = _collect_errors(validation)
-    warnings = _collect_warnings(validation)
+    errors = list(validation.get("errors", []) or [])
+    warnings = list(validation.get("warnings", []) or [])
 
-    # ------------------------------------------------------------------
-    # REJECT path — checked first so hard failures always win.
-    # ------------------------------------------------------------------
-    if not _is_valid_gstin(fields.get("gstin")) and fields.get("gstin") is not None:
-        return _reject(
-            confidence_value,
-            "Invalid GSTIN checksum; vendor identity cannot be confirmed.",
-        )
+    # 1. HARD REJECT CHECKS
+    gstin = fields.get("gstin")
+    if gstin is not None:
+        is_valid, reason = validate_gstin_checksum(str(gstin))
+        if not is_valid:
+            return _reject(confidence_val, f"GSTIN rejection: {reason}", "HIGH")
 
     if not fields.get("invoice_number"):
         return _reject(
-            confidence_value,
-            "Invoice number is missing — invoice cannot be matched to a PO.",
+            confidence_val,
+            "Invoice number is missing — invoice cannot be matched to purchase order.",
+            "HIGH",
         )
 
-    if not _amounts_are_consistent(fields):
+    if not amounts_consistent(fields):
         return _reject(
-            confidence_value,
-            "Amount inconsistency: subtotal + taxes does not match the total.",
+            confidence_val,
+            "Amount inconsistency: subtotal + taxes does not match total within 1.00 INR tolerance.",
+            "HIGH",
         )
 
-    if confidence_value < REJECT_CONFIDENCE:
+    if errors:
+        return _reject(confidence_val, f"Validation failure: {'; '.join(errors)}", "HIGH")
+
+    if confidence_val < REJECT_CONFIDENCE:
         return _reject(
-            confidence_value,
-            f"OCR confidence {confidence_value:.2f} is below the {REJECT_CONFIDENCE:.2f} threshold.",
+            confidence_val,
+            f"OCR confidence {confidence_val:.2f} is below the {REJECT_CONFIDENCE:.2f} threshold.",
+            "HIGH",
         )
 
-    # ------------------------------------------------------------------
-    # PENDING REVIEW path — soft warnings, mid-range confidence, or
-    # missing optional fields.
-    # ------------------------------------------------------------------
+    # 2. PENDING REVIEW CHECKS
     pending_reasons: list[str] = []
 
     if warnings:
+        pending_reasons.append(f"Policy warning: {'; '.join(warnings)}")
+
+    if REJECT_CONFIDENCE <= confidence_val < APPROVE_CONFIDENCE:
         pending_reasons.append(
-            "Company policy warning: " + "; ".join(warnings)
+            f"OCR confidence {confidence_val:.2f} is in review band [{REJECT_CONFIDENCE:.2f}, {APPROVE_CONFIDENCE:.2f})."
         )
-    if REJECT_CONFIDENCE <= confidence_value < APPROVE_CONFIDENCE:
-        pending_reasons.append(
-            f"OCR confidence {confidence_value:.2f} is in the review band "
-            f"[{REJECT_CONFIDENCE:.2f}, {APPROVE_CONFIDENCE:.2f})."
-        )
-    missing_optional = _missing_optional_fields(fields)
+
+    missing_optional = [k for k in ("vendor", "date") if not fields.get(k)]
     if missing_optional:
-        pending_reasons.append(
-            "Missing optional fields: " + ", ".join(missing_optional)
-        )
+        pending_reasons.append(f"Missing fields: {', '.join(missing_optional)}")
 
     if pending_reasons:
-        return _pending(confidence_value, " ".join(pending_reasons))
+        return _pending(confidence_val, " | ".join(pending_reasons), "MEDIUM")
 
-    # ------------------------------------------------------------------
-    # APPROVE path — clean validation, no warnings, high confidence.
-    # ------------------------------------------------------------------
-    if validation.get("passed") and confidence_value >= APPROVE_CONFIDENCE:
+    # 3. APPROVE PATH
+    if validation.get("passed", False) and confidence_val >= APPROVE_CONFIDENCE:
         return _approve(
-            confidence_value,
-            "Invoice passed all validation checks with high OCR confidence.",
+            confidence_val,
+            "Invoice passed all validation checks and arithmetic reconciliation with high OCR confidence.",
+            "LOW",
         )
 
-    # Fallback: validation didn't pass but no hard error was raised. Treat
-    # as pending so a human can take a look.
-    return _pending(
-        confidence_value,
-        "Validation did not pass; manual review required.",
-    )
+    return _pending(confidence_val, "Manual review required.", "MEDIUM")
 
 
-# ---------------------------------------------------------------------------
-# Response builders
-# ---------------------------------------------------------------------------
-
-def _approve(confidence: float, reason: str) -> dict[str, Any]:
+def _approve(confidence: float, reason: str, risk: str) -> dict[str, Any]:
     return {
         "decision": "APPROVE",
         "confidence": round(confidence, 4),
         "reason": reason,
-        "risk_level": "LOW",
+        "risk_level": risk,
     }
 
 
-def _reject(confidence: float, reason: str) -> dict[str, Any]:
+def _reject(confidence: float, reason: str, risk: str) -> dict[str, Any]:
     return {
         "decision": "REJECT",
         "confidence": round(confidence, 4),
         "reason": reason,
-        "risk_level": "HIGH",
+        "risk_level": risk,
     }
 
 
-def _pending(confidence: float, reason: str) -> dict[str, Any]:
+def _pending(confidence: float, reason: str, risk: str) -> dict[str, Any]:
     return {
         "decision": "PENDING REVIEW",
         "confidence": round(confidence, 4),
         "reason": reason,
-        "risk_level": "MEDIUM",
+        "risk_level": risk,
     }

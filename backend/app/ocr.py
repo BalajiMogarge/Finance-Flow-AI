@@ -1,43 +1,79 @@
-"""OCR helpers built on top of EasyOCR with memory safeguards for 512 MB limits.
+"""OCR helpers built on top of EasyOCR.
 
-We load the EasyOCR reader once and cache it. Input images are downscaled if
-they exceed reasonable dimensions, and inference is executed with PyTorch gradients
-disabled and garbage collection triggered to strictly honor container memory limits.
+Loads the EasyOCR reader once during application lifespan startup and warms it up
+with a dummy image so subsequent inference runs with zero cold-start delay.
+Input images are downscaled if they exceed OCR_MAX_IMAGE_DIM, and inference
+runs under torch.no_grad() with concurrency controlled by OCR_CONCURRENCY.
 """
 
 from __future__ import annotations
 
 import asyncio
 import gc
-from functools import lru_cache
+import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 from PIL import Image
 
 from .config import settings
 
-# Languages to recognise. English is default for invoices.
+logger = logging.getLogger(__name__)
+
+# Languages to recognise. English is standard for invoices.
 _OCR_LANGS: tuple[str, ...] = ("en",)
 
-# Global semaphore to prevent concurrent EasyOCR inferences from exhausting memory
-_ocr_semaphore = asyncio.Semaphore(settings.OCR_CONCURRENCY_LIMIT)
+_reader: object | None = None
+_ocr_semaphore = asyncio.Semaphore(settings.OCR_CONCURRENCY)
 
 
-@lru_cache(maxsize=1)
-def get_reader():
-    """Return a cached EasyOCR Reader instance."""
+def init_ocr() -> None:
+    """Initialize EasyOCR reader once at startup and warm up weights."""
+    global _reader
+    if _reader is not None:
+        return
+
     import easyocr
 
-    return easyocr.Reader(list(_OCR_LANGS), gpu=False, verbose=False)
+    logger.info("Initializing EasyOCR reader (gpu=False)...")
+    _reader = easyocr.Reader(
+        list(_OCR_LANGS),
+        gpu=False,
+        model_storage_directory=settings.EASYOCR_MODULE_PATH,
+        verbose=False,
+    )
+
+    # Warm-up inference with a 32x32 dummy image
+    try:
+        import torch
+
+        dummy_img = np.ones((32, 32, 3), dtype=np.uint8) * 255
+        with torch.no_grad():
+            _reader.readtext(dummy_img, detail=0)
+        logger.info("EasyOCR warm-up completed successfully.")
+    except Exception as exc:
+        logger.warning("EasyOCR warm-up encountered non-critical error: %s", exc)
+
+
+def is_ocr_ready() -> bool:
+    """Return True if the OCR reader model has been successfully loaded into memory."""
+    return _reader is not None
+
+
+def get_reader():
+    """Return the initialized EasyOCR Reader instance, initializing if needed."""
+    global _reader
+    if _reader is None:
+        init_ocr()
+    return _reader
 
 
 def _load_image(path: Path, max_dim: int = 1600) -> np.ndarray:
     """Load an image file into a numpy array, downscaling if oversized.
 
-    Prevents massive resolution images (e.g. 4K/8K scans) from causing OOM
-    spikes during PyTorch feature extraction.
+    Prevents ultra-high-resolution images (e.g. 4K/8K scans) from causing excessive
+    memory allocation during PyTorch feature extraction.
     """
     with Image.open(path) as img:
         img.load()
@@ -47,7 +83,7 @@ def _load_image(path: Path, max_dim: int = 1600) -> np.ndarray:
 
 
 def image_to_text(path: Path) -> dict:
-    """Run OCR on a single image file synchronously with memory safeguards.
+    """Run OCR on a single image file synchronously.
 
     Returns a dict with raw lines, concatenated text, average confidence,
     and line count.
@@ -77,7 +113,6 @@ def image_to_text(path: Path) -> dict:
     full_text = "\n".join(line["text"] for line in lines)
     avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
-    # Explicit cleanup to keep resident memory low on 512 MB instances
     del image
     gc.collect()
 
@@ -90,9 +125,6 @@ def image_to_text(path: Path) -> dict:
 
 
 async def async_image_to_text(path: Path) -> dict:
-    """Run OCR in a worker thread under the concurrency semaphore.
-
-    Guarantees the asyncio event loop remains non-blocking for all other requests.
-    """
+    """Run OCR in a worker thread under the concurrency semaphore."""
     async with _ocr_semaphore:
         return await asyncio.to_thread(image_to_text, path)

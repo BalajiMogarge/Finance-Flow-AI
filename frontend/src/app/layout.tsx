@@ -12,6 +12,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { ColdStartBanner } from "@/components/ColdStartBanner";
+
 export const metadata: Metadata = {
   title: "Finance Flow AI — Invoice Verification",
   description:
@@ -24,7 +26,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-background text-foreground">{children}</body>
+      <body className="min-h-full bg-background text-foreground">
+        <ColdStartBanner />
+        {children}
+      </body>
     </html>
   );
 }

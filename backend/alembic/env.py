@@ -25,8 +25,9 @@ if config.config_file_name is not None:
 # Model metadata
 target_metadata = Base.metadata
 
-# Dynamic database URL from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Dynamic database URL: prioritize direct (non-pooled) URL for migrations, fallback to DATABASE_URL
+migration_db_url = settings.DATABASE_URL_DIRECT or settings.DATABASE_URL
+config.set_main_option("sqlalchemy.url", migration_db_url)
 
 
 def run_migrations_offline() -> None:
@@ -47,7 +48,7 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = migration_db_url
 
     connect_args = {"check_same_thread": False} if settings.IS_SQLITE else {}
     connectable = engine_from_config(

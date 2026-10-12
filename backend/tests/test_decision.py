@@ -12,7 +12,6 @@ The tests are split into two layers:
 
 from __future__ import annotations
 
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -23,8 +22,7 @@ from unittest.mock import patch
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.decision import _gstin_checksum_is_valid, make_decision  # noqa: E402
-
+from app.decision import _gstin_checksum_is_valid, make_decision
 
 # A real checksum-valid GSTIN example.
 VALID_GSTIN = "27AAPFU0939F1ZV"
@@ -239,15 +237,15 @@ class UploadEndpointTests(unittest.TestCase):
             easyocr_stub.Reader = _Reader  # type: ignore[attr-defined]
             sys.modules["easyocr"] = easyocr_stub
 
+        import tempfile
+
         from fastapi.testclient import TestClient
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         from sqlalchemy.pool import StaticPool
-        import tempfile
-        import shutil
 
-        from app.database import Base, get_db
         from app.config import settings
+        from app.database import Base, get_db
         from app.main import app
 
         self._temp_dir = tempfile.mkdtemp()
@@ -273,10 +271,11 @@ class UploadEndpointTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
-        from app.main import app
-        from app.database import get_db
-        from app.config import settings
         import shutil
+
+        from app.config import settings
+        from app.database import get_db
+        from app.main import app
 
         app.dependency_overrides.pop(get_db, None)
         settings.UPLOAD_DIR = self._orig_upload_dir

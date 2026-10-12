@@ -11,7 +11,6 @@ import hashlib
 import io
 import sys
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException, status
 
@@ -74,7 +73,7 @@ def detect_file_type(content: bytes, filename: str) -> str:
     )
 
 
-def extract_text_from_pdf(content: bytes) -> Optional[dict]:
+def extract_text_from_pdf(content: bytes) -> dict | None:
     """Extract digital text from a PDF file using pypdf.
 
     Returns an OCR-compatible dictionary if embedded text is found, or None

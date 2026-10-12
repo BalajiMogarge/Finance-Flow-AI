@@ -1,0 +1,36 @@
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches: [main, production-hardening]
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    name: Sync Backend to Hugging Face
+    runs-on: ubuntu-latest
+    if: "${{ env.HF_TOKEN != '' }}"
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_SPACE_REPO: ${{ secrets.HF_SPACE_REPO }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push backend subdirectory to Hugging Face Space
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE_REPO" ]; then
+            echo "HF_TOKEN or HF_SPACE_REPO secret is not set. Skipping Hugging Face Space sync."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Push only the backend directory using git subtree
+          git subtree push --prefix backend "https://user:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_REPO" main

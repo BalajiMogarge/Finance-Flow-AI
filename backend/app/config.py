@@ -1,92 +1,126 @@
 """Application configuration for Finance Flow AI.
 
-Reads settings from environment variables with sensible production and local defaults.
-Handles Postgres vs SQLite configuration, CORS origins, storage targets, and OCR limits.
+Uses pydantic-settings to load, validate, and document all configuration
+from environment variables.
 """
 
 from __future__ import annotations
 
-import os
-import re
 from pathlib import Path
-from typing import List
+from typing import Any
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
-
-def _clean_database_url(url: str) -> str:
-    """Normalize database URL.
-
-    Render and other PaaS providers supply ``postgres://`` in DATABASE_URL,
-    which SQLAlchemy 1.4+ rejected in favor of ``postgresql://``.
-    """
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql://", 1)
-    return url
+INSECURE_KEYS = {
+    "secret",
+    "changeme",
+    "default",
+    "secretkey",
+    "password",
+    "finance-flow-ai-development-insecure-secret-key-change-in-production",
+}
 
 
-class Settings:
-    def __init__(self) -> None:
-        raw_db_url = os.environ.get(
-            "DATABASE_URL",
-            f"sqlite:///{(_BACKEND_ROOT / 'finance_flow.db').as_posix()}",
-        )
-        self.DATABASE_URL: str = _clean_database_url(raw_db_url)
-        self.IS_SQLITE: bool = self.DATABASE_URL.startswith("sqlite")
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-        # CORS: parse comma-separated string, or use default local development origins
-        raw_origins = os.environ.get("CORS_ALLOWED_ORIGINS")
-        if raw_origins:
-            self.CORS_ALLOWED_ORIGINS: List[str] = [
-                origin.strip() for origin in raw_origins.split(",") if origin.strip()
-            ]
-        else:
-            self.CORS_ALLOWED_ORIGINS = [
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:3001",
-            ]
+    # Environment
+    ENVIRONMENT: str = Field(default="development", description="Environment: development, test, production")
 
-        # Optional CORS regex for Vercel preview / deployment URLs (*.vercel.app)
-        self.CORS_ORIGIN_REGEX: str | None = os.environ.get(
-            "CORS_ORIGIN_REGEX",
-            r"^https://.*\.vercel\.app$",
-        )
+    # Database URLs
+    # DATABASE_URL is the Neon POOLED connection string used at runtime
+    DATABASE_URL: str = Field(
+        default=f"sqlite:///{(_BACKEND_ROOT / 'finance_flow.db').as_posix()}",
+        description="Neon pooled PostgreSQL connection URL (or SQLite for dev)",
+    )
+    # DATABASE_URL_DIRECT is the Neon unpooled / direct connection string used by Alembic
+    DATABASE_URL_DIRECT: str | None = Field(
+        default=None,
+        description="Direct (non-pooled) PostgreSQL connection URL for Alembic migrations",
+    )
 
-        # Upload & file storage
-        self.UPLOAD_DIR: Path = Path(
-            os.environ.get("UPLOAD_DIR", str(_BACKEND_ROOT / "uploads"))
-        ).resolve()
-        self.MAX_UPLOAD_BYTES: int = int(
-            os.environ.get("MAX_UPLOAD_BYTES", 10 * 1024 * 1024)
-        )  # 10 MB
+    # Security & Authentication
+    SECRET_KEY: str = Field(
+        default="finance-flow-ai-development-32-chars-minimum-secret-key!",
+        description="JWT secret key (minimum 32 characters)",
+    )
+    ALGORITHM: str = Field(default="HS256", description="JWT encryption algorithm")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=1440, description="Session expiration in minutes (24 hours)")
 
-        # S3 / Object storage (optional durable storage)
-        self.STORAGE_BACKEND: str = os.environ.get("STORAGE_BACKEND", "local").lower()
-        self.S3_ENDPOINT_URL: str | None = os.environ.get("S3_ENDPOINT_URL")
-        self.S3_BUCKET_NAME: str | None = os.environ.get("S3_BUCKET_NAME")
-        self.S3_ACCESS_KEY_ID: str | None = os.environ.get("S3_ACCESS_KEY_ID")
-        self.S3_SECRET_ACCESS_KEY: str | None = os.environ.get("S3_SECRET_ACCESS_KEY")
-        self.S3_REGION: str = os.environ.get("S3_REGION", "auto")
+    # CORS Configuration
+    FRONTEND_ORIGINS: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:3001"],
+        description="Allowed explicit frontend origins",
+    )
+    FRONTEND_PREVIEW_REGEX: str | None = Field(
+        default=r"^https://finance-flow-ai(-[a-zA-Z0-9_-]+)?\.vercel\.app$",
+        description="Regex pattern for scoped Vercel preview environments",
+    )
 
-        # Security & Authentication
-        self.SECRET_KEY: str = os.environ.get(
-            "SECRET_KEY",
-            "finance-flow-ai-development-insecure-secret-key-change-in-production",
-        )
-        self.ALGORITHM: str = "HS256"
-        self.ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
-            os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24)
-        )  # 24 hours
+    # Storage Backend
+    STORAGE_BACKEND: str = Field(default="local", description="File storage: 's3' or 'local'")
+    S3_ENDPOINT_URL: str | None = Field(default=None, description="S3-compatible endpoint (e.g. Supabase Storage)")
+    S3_REGION: str = Field(default="us-east-1", description="S3 region")
+    S3_ACCESS_KEY_ID: str | None = Field(default=None, description="S3 access key")
+    S3_SECRET_ACCESS_KEY: str | None = Field(default=None, description="S3 secret key")
+    S3_BUCKET: str | None = Field(default=None, description="Private S3 bucket name")
 
-        # OCR & Resource limits (tuned for Render free-tier 512 MB memory limit)
-        self.OCR_CONCURRENCY_LIMIT: int = int(
-            os.environ.get("OCR_CONCURRENCY_LIMIT", "1")
-        )
-        self.OCR_MAX_IMAGE_DIM: int = int(
-            os.environ.get("OCR_MAX_IMAGE_DIM", "1600")
-        )  # Downscale dimension cap
+    # Local storage (dev only)
+    UPLOAD_DIR: Path = Field(default=_BACKEND_ROOT / "uploads", description="Local uploads directory")
+    MAX_UPLOAD_BYTES: int = Field(default=10 * 1024 * 1024, description="Maximum upload size in bytes (10 MB)")
+
+    # OCR & Processing limits
+    OCR_CONCURRENCY: int = Field(default=1, description="Maximum concurrent OCR jobs")
+    OCR_MAX_IMAGE_DIM: int = Field(default=1600, description="Max width/height before downscaling image")
+    OCR_TIMEOUT_SECONDS: int = Field(default=90, description="Hard timeout per OCR job in seconds")
+    EASYOCR_MODULE_PATH: str | None = Field(default=None, description="Path to pre-downloaded EasyOCR model weights")
+
+    @property
+    def IS_SQLITE(self) -> bool:
+        return self.DATABASE_URL.startswith("sqlite")
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
+
+    @field_validator("DATABASE_URL_DIRECT", mode="before")
+    @classmethod
+    def normalize_direct_database_url(cls, v: str | None) -> str | None:
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
+
+    @field_validator("FRONTEND_ORIGINS", mode="before")
+    @classmethod
+    def parse_frontend_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    def validate_production_requirements(self) -> None:
+        """Validate critical production constraints upon application startup."""
+        # 1. SECRET_KEY validation
+        if not self.SECRET_KEY or len(self.SECRET_KEY) < 32:
+            raise ValueError("SECRET_KEY is invalid: must be at least 32 characters long.")
+        if self.ENVIRONMENT == "production" and self.SECRET_KEY in INSECURE_KEYS:
+            raise ValueError("Insecure default SECRET_KEY detected in production. You must set a strong SECRET_KEY.")
+
+        # 2. Storage backend validation
+        if self.ENVIRONMENT == "production" and self.STORAGE_BACKEND == "local":
+            raise ValueError(
+                "STORAGE_BACKEND='local' is forbidden in production! S3-compatible private bucket storage must be configured."
+            )
 
 
 settings = Settings()
+settings.validate_production_requirements()

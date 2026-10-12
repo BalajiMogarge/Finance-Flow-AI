@@ -1,13 +1,13 @@
 """Focused tests for invoice field extraction."""
 
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.extractor import extract_invoice_fields  # noqa: E402
+from app.extractor import extract_invoice_fields
 
 
 class ExtractorTests(unittest.TestCase):

@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from typing import Any, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Number parsing
@@ -31,7 +30,7 @@ _NUMBER_PATTERN = re.compile(
 )
 
 
-def _parse_number(raw: str) -> Optional[float]:
+def _parse_number(raw: str) -> float | None:
     """Parse a numeric token pulled out of OCR text into a float.
 
     Handles various thousands separators (comma or dot) and decimal marks.
@@ -65,7 +64,7 @@ def _parse_number(raw: str) -> Optional[float]:
 
 def _find_amount_after_label(
     text: str, label_patterns: list[re.Pattern[str]]
-) -> Optional[float]:
+) -> float | None:
     """Return the first numeric amount that appears after any of the labels."""
     for pattern in label_patterns:
         for match in pattern.finditer(text):
@@ -179,7 +178,7 @@ _VENDOR_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
-def _normalise_date(year: int, month: int, day: int) -> Optional[str]:
+def _normalise_date(year: int, month: int, day: int) -> str | None:
     """Return ``YYYY-MM-DD`` if the components form a real date."""
     if year < 100:
         year += 2000 if year < 70 else 1900
@@ -191,7 +190,7 @@ def _normalise_date(year: int, month: int, day: int) -> Optional[str]:
         return None
 
 
-def _extract_invoice_number(text: str) -> Optional[str]:
+def _extract_invoice_number(text: str) -> str | None:
     for pattern in _INVOICE_NUMBER_PATTERNS:
         match = pattern.search(text)
         if match:
@@ -203,14 +202,14 @@ def _extract_invoice_number(text: str) -> Optional[str]:
     return None
 
 
-def _extract_gstin(text: str) -> Optional[str]:
+def _extract_gstin(text: str) -> str | None:
     match = _GSTIN_PATTERN.search(text)
     if not match:
         return None
     return match.group("value").upper()
 
 
-def _extract_date(text: str) -> Optional[str]:
+def _extract_date(text: str) -> str | None:
     for pattern in _DATE_PATTERNS:
         match = pattern.search(text)
         if not match:
@@ -238,7 +237,7 @@ def _extract_date(text: str) -> Optional[str]:
     return None
 
 
-def _extract_vendor(text: str) -> Optional[str]:
+def _extract_vendor(text: str) -> str | None:
     for pattern in _VENDOR_PATTERNS:
         match = pattern.search(text)
         if match:
@@ -281,7 +280,7 @@ def _extract_vendor(text: str) -> Optional[str]:
     return best_candidate
 
 
-def _extract_amounts(text: str) -> dict[str, Optional[float]]:
+def _extract_amounts(text: str) -> dict[str, float | None]:
     return {
         "subtotal": _find_amount_after_label(text, _SUBTOTAL_LABELS),
         "cgst": _find_amount_after_label(text, _CGST_LABELS),

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  ExternalLink,
   FileText,
   ShieldAlert,
   ShieldCheck,
@@ -118,14 +119,27 @@ export function UploadResultPanel({ result, onDismiss }: Props) {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss result"
-          className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {result.file_url && (
+            <a
+              href={result.file_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Original File
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Dismiss result"
+            className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </header>
 
       {result.is_duplicate && (

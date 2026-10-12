@@ -1,32 +1,66 @@
 """Lightweight validation of extracted invoice fields.
 
 The validator runs after OCR + extraction and before the decision
-module. It is intentionally simple — it answers three questions:
-
-* Did we find every required field?
-* Are the amounts internally consistent?
-* Are there any soft warnings (e.g. duplicated invoice number, very
-  high total that may need finance approval)?
-
-The output schema — ``passed``, ``errors``, ``warnings`` — is what
-:func:`app.decision.make_decision` consumes.
+module. It checks:
+- Required fields (invoice_number, total)
+- Indian GSTIN format, valid state codes (01-38, 97, 99), and Luhn mod 36 checksum
+- Mathematical consistency: subtotal + cgst + sgst == total (<= 1.00 INR tolerance)
+- Soft policy warnings: high value (>= 200,000 INR), missing vendor, missing date
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
+ALPHABET_36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+VALID_STATE_CODES = {f"{i:02d}" for i in range(1, 39)} | {"97", "99"}
 
-# A real GSTIN is 15 chars: state code + PAN + entity + 'Z' + checksum.
-_GSTIN_PATTERN = re.compile(
+_GSTIN_FORMAT_REGEX = re.compile(
     r"^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9][A-Z][A-Z0-9]$",
     re.IGNORECASE,
 )
 
-# Soft caps that should trigger a policy warning (not a hard reject).
-# Tune these to match your finance team's thresholds.
 HIGH_VALUE_THRESHOLD = 200_000.0  # INR
+
+
+def validate_gstin_checksum(gstin: str) -> tuple[bool, str]:
+    """Validate 15-char Indian GSTIN structure, state code, and Mod 36 checksum.
+
+    Returns:
+        (is_valid, reason)
+    """
+    if not gstin or len(gstin.strip()) != 15:
+        return False, "GSTIN must be exactly 15 characters long"
+
+    cleaned = gstin.strip().upper()
+    if not _GSTIN_FORMAT_REGEX.match(cleaned):
+        return False, "GSTIN format is invalid (must be 2-digit state + 10-char PAN + 1 entity + Z + check digit)"
+
+    state_code = cleaned[:2]
+    if state_code not in VALID_STATE_CODES:
+        return False, f"Invalid state code '{state_code}' in GSTIN (must be 01-38, 97, or 99)"
+
+    total = 0
+    factor = 1
+    for ch in cleaned[:14]:
+        idx = ALPHABET_36.find(ch)
+        if idx == -1:
+            return False, f"Invalid character '{ch}' in GSTIN"
+        product = idx * factor
+        total += (product // 36) + (product % 36)
+        factor = 1 if factor == 2 else 2
+
+    expected_check_digit = ALPHABET_36[(36 - (total % 36)) % 36]
+    actual_check_digit = cleaned[14]
+
+    if actual_check_digit != expected_check_digit:
+        return (
+            False,
+            f"Invalid GSTIN checksum: expected check digit '{expected_check_digit}', got '{actual_check_digit}'",
+        )
+
+    return True, "Valid GSTIN"
 
 
 def _is_present(value: Any) -> bool:
@@ -37,44 +71,50 @@ def _is_present(value: Any) -> bool:
     return True
 
 
-def _amounts_consistent(fields: dict[str, Any]) -> bool:
-    """subtotal + cgst + sgst should equal total within a small tolerance."""
+def amounts_consistent(fields: dict[str, Any]) -> bool:
+    """Check if subtotal + cgst + sgst equals total within 1.00 INR tolerance."""
     subtotal = fields.get("subtotal")
     cgst = fields.get("cgst")
     sgst = fields.get("sgst")
     total = fields.get("total")
+
     if None in (subtotal, cgst, sgst, total):
-        return True  # can't tell — don't penalise here
+        return True  # Insufficient information to penalize
+
     try:
-        return abs(float(subtotal) + float(cgst) + float(sgst) - float(total)) <= 1.0
+        expected = float(subtotal) + float(cgst) + float(sgst)
+        diff = abs(expected - float(total))
+        return round(diff, 2) <= 1.00
     except (TypeError, ValueError):
         return False
 
 
 def validate_invoice(fields: dict[str, Any]) -> dict[str, Any]:
-    """Return the validation outcome for the given extracted fields.
+    """Validate extracted invoice dictionary.
 
-    The result always has the keys ``passed`` (bool), ``errors``
-    (list[str]) and ``warnings`` (list[str]).
+    Returns:
+        dict: {"passed": bool, "errors": list[str], "warnings": list[str]}
     """
     fields = fields or {}
     errors: list[str] = []
     warnings: list[str] = []
 
-    # --- hard requirements -------------------------------------------------
+    # --- Hard validation rules ---
     if not _is_present(fields.get("invoice_number")):
         errors.append("invoice_number is missing")
     if not _is_present(fields.get("total")):
         errors.append("total amount is missing")
 
     gstin = fields.get("gstin")
-    if gstin is not None and not _GSTIN_PATTERN.match(str(gstin).upper()):
-        errors.append("gstin is not a valid 15-character GSTIN")
+    if gstin is not None:
+        is_valid, reason = validate_gstin_checksum(str(gstin))
+        if not is_valid:
+            errors.append(reason)
 
-    if not _amounts_consistent(fields):
-        errors.append("subtotal + taxes does not match total")
+    if not amounts_consistent(fields):
+        errors.append("subtotal + taxes does not match total within 1.00 INR tolerance")
 
-    # --- soft warnings -----------------------------------------------------
+    # --- Soft warning rules ---
     if not _is_present(fields.get("vendor")):
         warnings.append("vendor name is missing")
     if not _is_present(fields.get("date")):
@@ -87,7 +127,7 @@ def validate_invoice(fields: dict[str, Any]) -> dict[str, Any]:
         )
 
     return {
-        "passed": not errors,
+        "passed": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
     }

@@ -5,8 +5,9 @@ filtering, file size limit (413), media type validation (415), and rate limiting
 
 import io
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -18,9 +19,8 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Invoice, User, Organization
-from app.auth import hash_password, create_access_token
-from app.rate_limit import upload_rate_limiter, api_rate_limiter
+from app.models import Invoice
+from app.rate_limit import upload_rate_limiter
 
 
 @pytest.fixture
@@ -51,8 +51,9 @@ def client(test_db):
     app.dependency_overrides[get_db] = override_get_db
     # Clear rate limit sliding windows before tests
     upload_rate_limiter.history.clear()
-    import tempfile
     import shutil
+    import tempfile
+
     from app.config import settings
 
     temp_dir = tempfile.mkdtemp()
@@ -79,7 +80,7 @@ class TestProductionFeatures:
         assert data["accuracy"] == 0.0
 
         # 2. Populate invoices
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         inv1 = Invoice(
             filename="inv1.png",
             vendor="Acme Corp",

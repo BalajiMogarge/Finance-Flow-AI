@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import sys
 import unittest
 from pathlib import Path
@@ -14,11 +13,9 @@ sys.path.insert(0, str(BACKEND_DIR))
 from fastapi.testclient import TestClient
 
 from app import database
-from app.auth import create_access_token, hash_password, verify_password
+from app.auth import hash_password, verify_password
 from app.database import Base
-from app.file_utils import calculate_sha256, detect_file_type
 from app.main import app
-from app.models import AuditLog, Invoice, Organization, User
 
 TEST_DB_PATH = BACKEND_DIR / "test_security.db"
 TEST_DATABASE_URL = f"sqlite:///{TEST_DB_PATH.as_posix()}"
@@ -63,6 +60,7 @@ class SecurityAndUploadTests(unittest.TestCase):
 
         # Isolate upload dir
         import tempfile
+
         from app.config import settings
         self._temp_dir = tempfile.mkdtemp()
         self._orig_upload_dir = settings.UPLOAD_DIR
@@ -72,6 +70,7 @@ class SecurityAndUploadTests(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         from app.config import settings
 
         settings.UPLOAD_DIR = self._orig_upload_dir
@@ -189,7 +188,7 @@ class SecurityAndUploadTests(unittest.TestCase):
         self.assertEqual(audit_res.status_code, 200)
         logs = audit_res.json()
         self.assertGreaterEqual(len(logs), 2)  # upload_processed + human_review
-        review_log = next(l for l in logs if l["action"] == "human_review")
+        review_log = next(entry for entry in logs if entry["action"] == "human_review")
         self.assertEqual(review_log["previous_state"], "PENDING REVIEW")
         self.assertEqual(review_log["new_state"], "APPROVE")
         self.assertIn("CFO", review_log["notes"])

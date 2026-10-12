@@ -87,9 +87,9 @@ export function RecentInvoicesTable() {
       setStatus("loading");
       setError(null);
       try {
-        const data = await fetchInvoices();
+        const data = await fetchInvoices({ page_size: 5 });
         if (!cancelled) {
-          setRows(data);
+          setRows(data.items);
           setStatus("ready");
         }
       } catch (err) {

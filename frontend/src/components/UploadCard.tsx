@@ -10,22 +10,26 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ApiError, uploadInvoice, type UploadResponse } from "@/lib/api";
+import {
+  ApiError,
+  uploadAndPollInvoice,
+  type UploadResponse,
+} from "@/lib/api";
 
-type UploadedFile = {
+type QueueStage = "idle" | "uploading" | "extracting" | "validating" | "completed" | "failed";
+
+type QueuedFile = {
   id: string;
   name: string;
   size: number;
   file: File;
+  stage: QueueStage;
+  error?: string;
+  result?: UploadResponse;
 };
 
-type ResultEntry = {
-  id: string;
-  fileName: string;
-  result: UploadResponse;
-};
-
-const ACCEPTED = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".pdf"];
+const ACCEPTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".pdf"];
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -40,23 +44,37 @@ type Props = {
 export function UploadCard({ onUploadComplete }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [lastResults, setLastResults] = useState<Record<string, ResultEntry>>({});
+  const [queue, setQueue] = useState<QueuedFile[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const validateFile = (file: File): string | null => {
+    const ext = "." + file.name.split(".").pop()?.toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      return `Unsupported file format (${ext}). Allowed: ${ACCEPTED_EXTENSIONS.join(", ")}`;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      return `File exceeds 10 MB limit (${formatBytes(file.size)}).`;
+    }
+    return null;
+  };
 
   const addFiles = useCallback((incoming: FileList | File[]) => {
     const list = Array.from(incoming);
     if (list.length === 0) return;
-    setFiles((prev) => [
-      ...prev,
-      ...list.map((f) => ({
+
+    const newEntries: QueuedFile[] = list.map((f) => {
+      const valError = validateFile(f);
+      return {
         id: `${f.name}-${f.size}-${Math.random().toString(36).slice(2, 8)}`,
         name: f.name,
         size: f.size,
         file: f,
-      })),
-    ]);
+        stage: valError ? "failed" : "idle",
+        error: valError ?? undefined,
+      };
+    });
+
+    setQueue((prev) => [...prev, ...newEntries]);
   }, []);
 
   const onDrop = useCallback(
@@ -87,48 +105,55 @@ export function UploadCard({ onUploadComplete }: Props) {
   );
 
   const removeFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+    setQueue((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  const uploadFiles = useCallback(async () => {
-    if (files.length === 0) return;
+  const processQueue = useCallback(async () => {
+    setIsProcessing(true);
 
-    setIsUploading(true);
-    setErrors({});
-    setLastResults({});
+    // Snapshot items to process sequentially
+    const items = queue.filter((item) => item.stage === "idle");
 
-    // We surface results in the UploadResultPanel (rendered by the page)
-    // by calling ``onUploadComplete`` for each successful response. The
-    // page decides whether to replace the previous result or stack
-    // multiple — current behavior is "show the most recent one".
-    for (const item of files) {
+    for (const item of items) {
+      // Update stage to uploading
+      setQueue((prev) =>
+        prev.map((q) => (q.id === item.id ? { ...q, stage: "uploading", error: undefined } : q))
+      );
+
       try {
-        const result = await uploadInvoice(item.file);
-        setLastResults((prev) => ({
-          ...prev,
-          [item.id]: { id: item.id, fileName: item.name, result },
-        }));
+        const result = await uploadAndPollInvoice(item.file, (stage) => {
+          setQueue((prev) =>
+            prev.map((q) => (q.id === item.id ? { ...q, stage } : q))
+          );
+        });
+
+        setQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, stage: "completed", result } : q))
+        );
+
         onUploadComplete?.(result);
-        // Ask sibling components (Stats, Invoices) to refresh.
         window.dispatchEvent(new Event("finance-flow:refresh"));
-      } catch (err) {
-        const message =
+      } catch (err: unknown) {
+        const errorMsg =
           err instanceof ApiError
-            ? err.detail ?? err.message
+            ? err.detail || err.message
             : err instanceof Error
               ? err.message
-              : "Upload failed";
-        setErrors((prev) => ({ ...prev, [item.id]: message }));
+              : "Upload and extraction failed";
+
+        setQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, stage: "failed", error: errorMsg } : q))
+        );
       }
     }
 
-    setIsUploading(false);
-  }, [files, onUploadComplete]);
+    setIsProcessing(false);
+  }, [queue, onUploadComplete]);
 
   return (
     <section
       className={cn(
-        "rounded-2xl border border-zinc-200 bg-white shadow-sm",
+        "rounded-2xl border border-zinc-200 bg-white shadow-xs",
         "dark:border-zinc-800 dark:bg-zinc-950"
       )}
     >
@@ -138,7 +163,7 @@ export function UploadCard({ onUploadComplete }: Props) {
             Upload invoices
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            PNG, JPG, WebP, BMP, TIFF, or PDF — up to 10 MB each.
+            PNG, JPG, WebP, BMP, TIFF, or PDF — max 10 MB per file.
           </p>
         </div>
         <span
@@ -147,7 +172,7 @@ export function UploadCard({ onUploadComplete }: Props) {
             "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
           )}
         >
-          OCR + AI
+          Fast-Path + OCR
         </span>
       </header>
 
@@ -179,7 +204,7 @@ export function UploadCard({ onUploadComplete }: Props) {
               "flex h-12 w-12 items-center justify-center rounded-full transition-colors",
               isDragging
                 ? "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300"
-                : "bg-white text-zinc-700 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-800"
+                : "bg-white text-zinc-700 shadow-xs ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-800"
             )}
             aria-hidden
           >
@@ -191,7 +216,7 @@ export function UploadCard({ onUploadComplete }: Props) {
               or drag and drop
             </p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              {ACCEPTED.join(", ")} · max 10 MB
+              {ACCEPTED_EXTENSIONS.join(", ")} · max 10 MB
             </p>
           </div>
 
@@ -200,20 +225,18 @@ export function UploadCard({ onUploadComplete }: Props) {
             type="file"
             className="hidden"
             multiple
-            accept={ACCEPTED.join(",")}
+            accept={ACCEPTED_EXTENSIONS.join(",")}
             onChange={onInputChange}
           />
         </div>
 
-        {/* Selected files list */}
-        {files.length > 0 && (
+        {/* Queued files list */}
+        {queue.length > 0 && (
           <ul className="mt-4 space-y-2">
-            {files.map((f) => {
-              const error = errors[f.id];
-              const result = lastResults[f.id];
+            {queue.map((item) => {
               return (
                 <li
-                  key={f.id}
+                  key={item.id}
                   className={cn(
                     "rounded-lg border bg-zinc-50/60 px-3 py-2 text-sm",
                     "border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900/50"
@@ -228,48 +251,63 @@ export function UploadCard({ onUploadComplete }: Props) {
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-zinc-900 dark:text-zinc-50">
-                        {f.name}
+                        {item.name}
                       </p>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {formatBytes(f.size)}
+                        {formatBytes(item.size)}
                       </p>
                     </div>
-                    {isUploading ? (
-                      <span
-                        className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400"
-                        aria-label="Uploading"
-                      >
+
+                    {/* Progress / Status Badges */}
+                    {item.stage === "uploading" && (
+                      <span className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         Uploading
                       </span>
-                    ) : error ? (
-                      <span className="flex items-center gap-1 text-xs text-zinc-700 dark:text-zinc-200">
+                    )}
+                    {item.stage === "extracting" && (
+                      <span className="flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Extracting
+                      </span>
+                    )}
+                    {item.stage === "validating" && (
+                      <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Validating
+                      </span>
+                    )}
+                    {item.stage === "completed" && (
+                      <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Completed
+                      </span>
+                    )}
+                    {item.stage === "failed" && (
+                      <span className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
                         <AlertCircle className="h-3.5 w-3.5" />
                         Failed
                       </span>
-                    ) : result ? (
-                      <span className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Done
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Ready
+                    )}
+                    {item.stage === "idle" && (
+                      <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+                        Queued
                       </span>
                     )}
+
                     <button
                       type="button"
-                      onClick={() => removeFile(f.id)}
-                      className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                      aria-label={`Remove ${f.name}`}
+                      disabled={isProcessing && item.stage !== "idle" && item.stage !== "completed" && item.stage !== "failed"}
+                      onClick={() => removeFile(item.id)}
+                      className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      aria-label={`Remove ${item.name}`}
                     >
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  {error && (
-                    <p className="mt-1 pl-11 text-xs text-zinc-600 dark:text-zinc-300">
-                      {error}
+                  {item.error && (
+                    <p className="mt-1 pl-11 text-xs text-red-600 dark:text-red-400">
+                      {item.error}
                     </p>
                   )}
                 </li>
@@ -279,12 +317,8 @@ export function UploadCard({ onUploadComplete }: Props) {
             <li className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => {
-                  setFiles([]);
-                  setErrors({});
-                  setLastResults({});
-                }}
-                disabled={isUploading}
+                onClick={() => setQueue([])}
+                disabled={isProcessing}
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-sm font-medium",
                   "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
@@ -292,24 +326,22 @@ export function UploadCard({ onUploadComplete }: Props) {
                   "disabled:cursor-not-allowed disabled:opacity-50"
                 )}
               >
-                Clear
+                Clear all
               </button>
               <button
                 type="button"
-                onClick={uploadFiles}
-                disabled={isUploading}
+                onClick={processQueue}
+                disabled={isProcessing || !queue.some((q) => q.stage === "idle")}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm",
+                  "inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-xs",
                   "transition-colors hover:bg-blue-700",
                   "disabled:cursor-not-allowed disabled:opacity-50"
                 )}
               >
-                {isUploading && (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                )}
-                {isUploading
-                  ? "Processing..."
-                  : `Process ${files.length} ${files.length === 1 ? "file" : "files"}`}
+                {isProcessing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {isProcessing
+                  ? "Processing Queue..."
+                  : `Process ${queue.filter((q) => q.stage === "idle").length} Queued`}
               </button>
             </li>
           </ul>

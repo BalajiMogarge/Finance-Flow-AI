@@ -1,0 +1,44 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-flow-backend
+    ports:
+      - "7860:7860"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://finance_flow_user:finance_flow_pass@db:5432/finance_flow
+      - DATABASE_URL_DIRECT=postgresql://finance_flow_user:finance_flow_pass@db:5432/finance_flow
+      - SECRET_KEY=local-development-secret-key-at-least-32-chars-long!
+      - STORAGE_BACKEND=local
+      - OCR_CONCURRENCY=1
+      - OCR_TIMEOUT_SECONDS=90
+      - FRONTEND_ORIGINS=http://localhost:3000,http://localhost:3001
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+
+  db:
+    image: postgres:15-alpine
+    container_name: finance-flow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finance_flow_user
+      POSTGRES_PASSWORD: finance_flow_pass
+      POSTGRES_DB: finance_flow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance_flow_user -d finance_flow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  uploads_data:
