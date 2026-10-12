@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=1440, description="Session expiration in minutes (24 hours)")
 
     # CORS Configuration
-    FRONTEND_ORIGINS: list[str] = Field(
+    FRONTEND_ORIGINS: str | list[str] = Field(
         default=["http://localhost:3000", "http://localhost:3001"],
-        description="Allowed explicit frontend origins",
+        description="Allowed explicit frontend origins (comma-separated or JSON array)",
     )
     FRONTEND_PREVIEW_REGEX: str | None = Field(
         default=r"^https://finance-flow-ai(-[a-zA-Z0-9_-]+)*\.vercel\.app$",
@@ -99,12 +99,24 @@ class Settings(BaseSettings):
             return v.replace("postgres://", "postgresql://", 1)
         return v
 
-    @field_validator("FRONTEND_ORIGINS", mode="before")
+    @field_validator("FRONTEND_ORIGINS", mode="after")
     @classmethod
     def parse_frontend_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+            v_str = v.strip()
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    import json
+
+                    parsed = json.loads(v_str)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            return [origin.strip() for origin in v_str.split(",") if origin.strip()]
+        if isinstance(v, list):
+            return [str(origin).strip() for origin in v if str(origin).strip()]
+        return []
 
     def validate_production_requirements(self) -> None:
         """Validate critical production constraints upon application startup."""
