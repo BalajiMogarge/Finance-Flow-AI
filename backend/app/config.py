@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         description="Allowed explicit frontend origins",
     )
     FRONTEND_PREVIEW_REGEX: str | None = Field(
-        default=r"^https://finance-flow-ai(-[a-zA-Z0-9_-]+)?\.vercel\.app$",
+        default=r"^https://finance-flow-ai(-[a-zA-Z0-9_-]+)*\.vercel\.app$",
         description="Regex pattern for scoped Vercel preview environments",
     )
 
