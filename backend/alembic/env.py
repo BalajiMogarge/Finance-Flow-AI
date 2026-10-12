@@ -27,18 +27,22 @@ target_metadata = Base.metadata
 
 # Dynamic database URL: prioritize direct (non-pooled) URL for migrations, fallback to DATABASE_URL
 migration_db_url = settings.DATABASE_URL_DIRECT or settings.DATABASE_URL
+if migration_db_url.startswith("postgresql://"):
+    migration_db_url = migration_db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
 config.set_main_option("sqlalchemy.url", migration_db_url)
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
+    is_sqlite = "sqlite" in (url or "")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=settings.IS_SQLITE,
+        render_as_batch=is_sqlite,
     )
 
     with context.begin_transaction():
@@ -50,7 +54,8 @@ def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = migration_db_url
 
-    connect_args = {"check_same_thread": False} if settings.IS_SQLITE else {}
+    is_sqlite = "sqlite" in migration_db_url
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",

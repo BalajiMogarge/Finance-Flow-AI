@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 def create_app_engine(database_url: str):
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
     connect_args = {}
 
     if settings.IS_SQLITE:
