@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, production-hardening, render-demo-ready]
+    branches: [main, production-hardening, render-demo-ready, feature/demo-ui-redesign]
   pull_request:
     branches: [main, production-hardening, render-demo-ready]
 
@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: actions/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Backend Docker Image
         run: |
@@ -82,4 +82,20 @@ jobs:
 
       - name: Verify Execution within Render 512MB RAM Limit
         run: |
-          docker run --memory="512m" --memory-swap="512m" --rm finance-flow-backend python -c "from app.ocr import init_ocr, image_to_text; init_ocr(); print('RapidOCR initialized successfully within Render 512MB cgroup limit!')"
+          docker run --memory="512m" --memory-swap="512m" --rm finance-flow-backend python -c "
+          import resource
+          from app.ocr import init_ocr, image_to_text
+          from PIL import Image
+          from pathlib import Path
+          import tempfile
+          init_ocr()
+          with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+              Image.new('RGB', (800, 600), color='white').save(f.name)
+              tmp_path = Path(f.name)
+          res = image_to_text(tmp_path)
+          tmp_path.unlink(missing_ok=True)
+          peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+          print(f'Measured peak working set: {peak_mb:.2f} MB')
+          print(f'Render 512MB headroom: {512.0 - peak_mb:.2f} MB ({(512.0 - peak_mb)/512.0*100:.1f}%)')
+          print('RapidOCR initialized and executed successfully within Render 512MB cgroup limit!')
+          "
