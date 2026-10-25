@@ -12,8 +12,8 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies for ONNX runtime, OpenCV, and container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    libgl1 \
     libglib2.0-0 \
-    libxcb1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
