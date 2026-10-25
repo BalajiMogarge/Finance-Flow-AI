@@ -71,6 +71,45 @@ class DecisionUnitTests(unittest.TestCase):
         # The reason should mention the success path.
         self.assertIn("passed", result["reason"].lower())
 
+    def test_approved_invoice_with_igst(self):
+        fields = {
+            "invoice_number": "INV-IGST-01",
+            "vendor": "Interstate Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 2000.0,
+            "igst": 360.0,
+            "cgst": None,
+            "sgst": None,
+            "total": 2360.0,
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.95,
+        )
+        self.assertEqual(result["decision"], "APPROVE")
+        self.assertEqual(result["risk_level"], "LOW")
+
+    def test_rejected_invoice_igst_mismatch(self):
+        fields = {
+            "invoice_number": "INV-IGST-02",
+            "vendor": "Interstate Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 2000.0,
+            "igst": 360.0,
+            "total": 2999.0,  # Mismatch
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.95,
+        )
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertEqual(result["risk_level"], "HIGH")
+        self.assertIn("amount", result["reason"].lower())
+
     # ------------------------------------------------------------------
     # REJECT
     # ------------------------------------------------------------------

@@ -23,6 +23,12 @@ class ExtractorTests(unittest.TestCase):
         fields = extract_invoice_fields({"text": "Date: 31-02-2026"})
         self.assertIsNone(fields["date"])
 
+    def test_extracts_igst_interstate_tax(self):
+        fields = extract_invoice_fields({"text": "Subtotal: 1000.00\nIGST @18%: 180.00\nTotal: 1180.00"})
+        self.assertEqual(fields["subtotal"], 1000.0)
+        self.assertEqual(fields["igst"], 180.0)
+        self.assertEqual(fields["total"], 1180.0)
+
 
 if __name__ == "__main__":
     unittest.main()

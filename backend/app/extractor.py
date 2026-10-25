@@ -158,6 +158,9 @@ _CGST_LABELS: list[re.Pattern[str]] = [
 _SGST_LABELS: list[re.Pattern[str]] = [
     re.compile(r"\b(?:sgst|state\s+gst|state\s+tax|utgst)\b", re.IGNORECASE),
 ]
+_IGST_LABELS: list[re.Pattern[str]] = [
+    re.compile(r"\b(?:igst|integrated\s+gst|integrated\s+tax)\b", re.IGNORECASE),
+]
 _TOTAL_LABELS: list[re.Pattern[str]] = [
     re.compile(r"\b(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|balance\s+due|total)\b", re.IGNORECASE),
 ]
@@ -285,6 +288,7 @@ def _extract_amounts(text: str) -> dict[str, float | None]:
         "subtotal": _find_amount_after_label(text, _SUBTOTAL_LABELS),
         "cgst": _find_amount_after_label(text, _CGST_LABELS),
         "sgst": _find_amount_after_label(text, _SGST_LABELS),
+        "igst": _find_amount_after_label(text, _IGST_LABELS),
         "total": _find_amount_after_label(text, _TOTAL_LABELS),
     }
 
@@ -323,5 +327,6 @@ def extract_invoice_fields(ocr_output: dict[str, Any]) -> dict[str, Any]:
         "subtotal": amounts["subtotal"],
         "cgst": amounts["cgst"],
         "sgst": amounts["sgst"],
+        "igst": amounts["igst"],
         "total": amounts["total"],
     }
