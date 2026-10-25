@@ -203,14 +203,19 @@ def _extract_invoice_number(text: str) -> str | None:
             continue
         tail = text[match.end(): match.end() + 120]
         tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-/]{1,30}", tail)
-        # 1. Prefer tokens with at least one digit (and not 6-digit postal code or 4-digit standalone year)
+        # 1. First priority: tokens with BOTH letters and digits (e.g. MET-2026-904, APX/2026/0412, THI-CAPEX-2026-04)
         for token in tokens:
             token_clean = token.strip(" .,;:-")
-            if re.fullmatch(r"\d{6}", token_clean):
+            if re.fullmatch(r"\d{6}", token_clean) or re.fullmatch(r"20\d{2}", token_clean):
                 continue
-            if re.fullmatch(r"20\d{2}", token_clean):
+            if any(ch.isalpha() for ch in token_clean) and any(ch.isdigit() for ch in token_clean):
+                return token_clean
+        # 2. Second priority: pure numeric tokens with >= 3 digits (e.g. 10248), ignoring short street numbers like 14
+        for token in tokens:
+            token_clean = token.strip(" .,;:-")
+            if re.fullmatch(r"\d{6}", token_clean) or re.fullmatch(r"20\d{2}", token_clean):
                 continue
-            if any(ch.isdigit() for ch in token_clean):
+            if token_clean.isdigit() and len(token_clean) >= 3:
                 return token_clean
         # Fallback to first non-empty token
         for token in tokens:
@@ -271,8 +276,10 @@ def _extract_vendor(text: str) -> str | None:
     excluded_starts = (
         "invoice", "bill", "tax", "gstin", "gst", "date",
         "total", "amount", "subtotal", "address", "contact", "phone", "email",
-        "due date", "place of", "terms", "description", "hsn", "qty", "rate"
+        "due date", "place of", "terms", "description", "hsn", "qty", "rate",
+        "slip", "order", "receipt"
     )
+    buyer_starts = ("bill to", "billed to", "buyer", "customer", "client", "ship to", "consignee")
     business_indicators = ("ltd", "pvt", "corp", "inc", "llp", "services", "enterprises", "caterers", "industries")
 
     lines = [line.strip(" -:.;,") for line in text.splitlines()]
@@ -293,11 +300,20 @@ def _extract_vendor(text: str) -> str | None:
         line = raw_line.strip(" -:.;,")
         if not line or len(line) < 3 or len(line) > 60:
             continue
+        # Stop fallback search if we reach customer/buyer block
+        if any(line.lower().startswith(b) for b in buyer_starts):
+            break
         if line.lower().startswith(excluded_starts):
             continue
         if _NUMBER_PATTERN.fullmatch(line):
             continue
         if not any(ch.isalpha() for ch in line):
+            continue
+        # Company names aren't single code tokens without spaces (e.g. SLIP-9901)
+        if " " not in line and not any(ind in line.lower() for ind in business_indicators):
+            continue
+        # Skip date fragments (e.g. 25 Aug 2026)
+        if re.search(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", line, re.I):
             continue
 
         # Strong signal: contains a business suffix

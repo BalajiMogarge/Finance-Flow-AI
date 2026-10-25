@@ -113,6 +113,15 @@ def amounts_consistent(fields: dict[str, Any]) -> bool:
         # 2. Intra-state CGST + SGST
         if has_cgst_sgst:
             candidates.append(subtotal_val + cgst_val + sgst_val)
+            # Under Indian GST, CGST and SGST must be equal amounts. In case OCR
+            # noisy-corrupted one tax amount (e.g. misreading '₹36,000' as '736,000'),
+            # test symmetric tax candidates:
+            candidates.append(subtotal_val + (cgst_val * 2))
+            candidates.append(subtotal_val + (sgst_val * 2))
+        elif cgst_val is not None:
+            candidates.append(subtotal_val + (cgst_val * 2))
+        elif sgst_val is not None:
+            candidates.append(subtotal_val + (sgst_val * 2))
 
         for expected in candidates:
             if round(abs(expected - total_val), 2) <= 1.00:

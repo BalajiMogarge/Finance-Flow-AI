@@ -47,6 +47,16 @@ class ExtractorTests(unittest.TestCase):
         fields = extract_invoice_fields({"text": text})
         self.assertEqual(fields["vendor"], "Apex CloudTech Solutions Pvt. Ltd")
 
+    def test_prefers_alphanumeric_invoice_over_street_numbers(self):
+        text = "Invoice No:\n14 Commercial Complex\nMET-2026-904\nDate: 10 Aug 2026"
+        fields = extract_invoice_fields({"text": text})
+        self.assertEqual(fields["invoice_number"], "MET-2026-904")
+
+    def test_does_not_extract_buyer_as_vendor(self):
+        text = "TAX INVOICE / COUNTER SLIP\nInvoice No: SLIP-9901\nDate: 25 Aug 2026\nBill To:\nCorporate Guest Account"
+        fields = extract_invoice_fields({"text": text})
+        self.assertIsNone(fields["vendor"])
+
 
 if __name__ == "__main__":
     unittest.main()

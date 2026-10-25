@@ -67,6 +67,25 @@ class DecisionUnitTests(unittest.TestCase):
 
         self.assertEqual(result["decision"], "APPROVE")
         self.assertEqual(result["risk_level"], "LOW")
+
+    def test_reconciles_noisy_symmetric_gst(self):
+        fields = {
+            "invoice_number": "INV-SYM-01",
+            "vendor": "Equip Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 40000.0,
+            "cgst": 3600.0,
+            "sgst": 73600.0,  # OCR misread leading symbol
+            "total": 47200.0,
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.92,
+        )
+        self.assertEqual(result["decision"], "APPROVE")
+        self.assertEqual(result["risk_level"], "LOW")
         self.assertGreaterEqual(result["confidence"], 0.85)
         # The reason should mention the success path.
         self.assertIn("passed", result["reason"].lower())
@@ -87,6 +106,25 @@ class DecisionUnitTests(unittest.TestCase):
             _approved_validation(),
             fields,
             confidence=0.95,
+        )
+        self.assertEqual(result["decision"], "APPROVE")
+        self.assertEqual(result["risk_level"], "LOW")
+
+    def test_reconciles_noisy_symmetric_gst(self):
+        fields = {
+            "invoice_number": "INV-SYM-01",
+            "vendor": "Equip Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 40000.0,
+            "cgst": 3600.0,
+            "sgst": 73600.0,  # OCR misread leading symbol
+            "total": 47200.0,
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.92,
         )
         self.assertEqual(result["decision"], "APPROVE")
         self.assertEqual(result["risk_level"], "LOW")
