@@ -29,6 +29,24 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(fields["igst"], 180.0)
         self.assertEqual(fields["total"], 1180.0)
 
+    def test_parses_parenthetical_tax_rates_and_currency_glyphs(self):
+        text = "Subtotal\nR60,000.00\nCGST (9%)\n#5,400.00\nSGST (9%)\nR5,400.00\nTotal (INR)\nR70,800.00"
+        fields = extract_invoice_fields({"text": text})
+        self.assertEqual(fields["subtotal"], 60000.0)
+        self.assertEqual(fields["cgst"], 5400.0)
+        self.assertEqual(fields["sgst"], 5400.0)
+        self.assertEqual(fields["total"], 70800.0)
+
+    def test_extracts_invoice_number_across_columnar_lines(self):
+        text = "Invoice No:\nExpress Towers, Nariman Point\nVNG-2026-881\nDate: 22 Aug 2026"
+        fields = extract_invoice_fields({"text": text})
+        self.assertEqual(fields["invoice_number"], "VNG-2026-881")
+
+    def test_extracts_vendor_around_tax_invoice_title(self):
+        text = "Apex CloudTech\nTAX INVOICE\nSolutions Pvt. Ltd.\nPlot 42, Electronic City"
+        fields = extract_invoice_fields({"text": text})
+        self.assertEqual(fields["vendor"], "Apex CloudTech Solutions Pvt. Ltd")
+
 
 if __name__ == "__main__":
     unittest.main()

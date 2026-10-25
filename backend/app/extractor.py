@@ -68,10 +68,15 @@ def _find_amount_after_label(
     """Return the first numeric amount that appears after any of the labels."""
     for pattern in label_patterns:
         for match in pattern.finditer(text):
-            tail = text[match.end(): match.end() + 80]
-            # Skip stray percent markers (e.g. "CGST @9%: 360.00") so we
-            # don't pick up the tax rate as the tax amount.
-            tail = re.sub(r"\s*@\s*\d+(?:\.\d+)?\s*%", " ", tail)
+            tail = text[match.end(): match.end() + 100]
+            # Skip stray tax rate percentages (e.g. "CGST (9%)", "IGST @18%", "SGST (2.5%)")
+            # so we don't pick up the tax rate percentage as the tax amount.
+            tail = re.sub(r"[\(@]?\s*\d+(?:\.\d+)?\s*%\s*\)?", " ", tail)
+            # Strip currency labels and OCR artifacts (e.g. "INR", "Rs.", "₹", "R60,000", "#5,400")
+            tail = re.sub(r"(?:₹|rs\.?|inr)\s*", " ", tail, flags=re.IGNORECASE)
+            tail = re.sub(r"[₹#]", " ", tail)
+            tail = re.sub(r"\b[rR](?=\d)", " ", tail)
+            tail = re.sub(r"(?:^|[\s\W])[rR#](?=\d)", " ", tail)
             amount_match = _NUMBER_PATTERN.search(tail)
             if amount_match:
                 value = _parse_number(amount_match.group(0))
@@ -91,22 +96,16 @@ def _find_amount_after_label(
 _INVOICE_NUMBER_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
         r"\b(?:invoice|tax\s*invoice|receipt)\b\s*"
-        r"(?:#(?=\s)|no(?:\.|\b)|number\b|num(?:\.|\b))\s*[:\-]?\s*"
-        r"(?P<value>[A-Za-z0-9][A-Za-z0-9\-/]{1,30}?)"
-        r"(?=\s|$|[^A-Za-z0-9\-/])",
+        r"(?:#(?=\s)|no(?:\.|\b)|number\b|num(?:\.|\b))\s*[:\-]?",
         re.IGNORECASE,
     ),
     re.compile(
         r"\b(?:inv|bill)\b\s*"
-        r"(?:#(?=\s)|no(?:\.|\b)|number\b|num(?:\.|\b))\s*[:\-]?\s*"
-        r"(?P<value>[A-Za-z0-9][A-Za-z0-9\-/]{1,30}?)"
-        r"(?=\s|$|[^A-Za-z0-9\-/])",
+        r"(?:#(?=\s)|no(?:\.|\b)|number\b|num(?:\.|\b))\s*[:\-]?",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:invoice|inv)\b\s*[:#\-]\s*"
-        r"(?P<value>[A-Za-z0-9][A-Za-z0-9\-/]{1,30}?)"
-        r"(?=\s|$|[^A-Za-z0-9\-/])",
+        r"\b(?:invoice|inv)\b\s*[:#\-]",
         re.IGNORECASE,
     ),
 ]
@@ -170,12 +169,16 @@ _TOTAL_LABELS: list[re.Pattern[str]] = [
 # the first uppercase-heavy line.
 _VENDOR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
-        r"(?:from|sold\s+by|vendor|supplier|seller|bill\s+from|billed\s+from)"
+        r"(?:\bfrom\s*[:\-]|sold\s+by|vendor|supplier|seller|bill\s+from|billed\s+from)"
         r"\s*[:\-]?\s*(?P<value>[A-Za-z][A-Za-z0-9&.,'\- ]{2,60})",
         re.IGNORECASE,
     ),
     re.compile(
         r"(?:m/s\.?|m/s)\s*(?P<value>[A-Za-z][A-Za-z0-9&.,'\- ]{2,60})",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bfor\s+(?P<value>[A-Za-z][A-Za-z0-9&.,'\- ]{2,60}(?:ltd|pvt|corp|inc|llp|enterprises|solutions)\.?)",
         re.IGNORECASE,
     ),
 ]
@@ -196,12 +199,24 @@ def _normalise_date(year: int, month: int, day: int) -> str | None:
 def _extract_invoice_number(text: str) -> str | None:
     for pattern in _INVOICE_NUMBER_PATTERNS:
         match = pattern.search(text)
-        if match:
-            value = match.group("value").strip(" .,;:")
-            # Strip trailing label fragments that OCR sometimes glues on.
-            value = re.split(r"\s{2,}", value)[0]
-            if value:
-                return value
+        if not match:
+            continue
+        tail = text[match.end(): match.end() + 120]
+        tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-/]{1,30}", tail)
+        # 1. Prefer tokens with at least one digit (and not 6-digit postal code or 4-digit standalone year)
+        for token in tokens:
+            token_clean = token.strip(" .,;:-")
+            if re.fullmatch(r"\d{6}", token_clean):
+                continue
+            if re.fullmatch(r"20\d{2}", token_clean):
+                continue
+            if any(ch.isdigit() for ch in token_clean):
+                return token_clean
+        # Fallback to first non-empty token
+        for token in tokens:
+            token_clean = token.strip(" .,;:-")
+            if token_clean.lower() not in ("date", "dated", "due", "no", "number", "gstin"):
+                return token_clean
     return None
 
 
@@ -247,20 +262,33 @@ def _extract_vendor(text: str) -> str | None:
             value = match.group("value").strip(" .,;:")
             # Drop anything past a stray newline.
             value = value.splitlines()[0].strip()
-            if value:
+            # Avoid terms text false-positives
+            if value and not value.lower().startswith(("the date", "this invoice", "our company")):
                 return value
 
     # Fallback: the first short line near the top of the invoice is usually
     # the company name.
     excluded_starts = (
         "invoice", "bill", "tax", "gstin", "gst", "date",
-        "total", "amount", "subtotal", "address", "contact", "phone", "email"
+        "total", "amount", "subtotal", "address", "contact", "phone", "email",
+        "due date", "place of", "terms", "description", "hsn", "qty", "rate"
     )
-    business_indicators = ("ltd", "pvt", "corp", "inc", "llp", "services", "enterprises")
+    business_indicators = ("ltd", "pvt", "corp", "inc", "llp", "services", "enterprises", "caterers", "industries")
 
-    lines = text.splitlines()
+    lines = [line.strip(" -:.;,") for line in text.splitlines()]
+    lines = [line for line in lines if line]
+
+    # Check for multi-line company name separated by TAX INVOICE or INVOICE
+    for i in range(min(len(lines), 10)):
+        cur = lines[i].lower()
+        if cur in ("tax invoice", "invoice", "expense statement", "bill of supply", "cash receipt"):
+            if i > 0 and i + 1 < len(lines):
+                prev_line = lines[i - 1]
+                next_line = lines[i + 1]
+                if not prev_line.lower().startswith(excluded_starts) and any(ind in next_line.lower() for ind in business_indicators):
+                    return f"{prev_line} {next_line}"
+
     best_candidate = None
-
     for raw_line in lines[:15]:  # Only look at the first 15 lines
         line = raw_line.strip(" -:.;,")
         if not line or len(line) < 3 or len(line) > 60:
