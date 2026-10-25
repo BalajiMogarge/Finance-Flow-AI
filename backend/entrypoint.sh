@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
+# If arguments are passed (e.g. docker run container python -c ...), execute them directly
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 echo "=== Finance Flow AI Backend Container Startup ==="
 
 # Prioritize direct unpooled database connection for DDL migrations
