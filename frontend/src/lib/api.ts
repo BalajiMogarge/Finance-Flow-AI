@@ -48,6 +48,8 @@ export type InvoiceRow = {
   confidence: number | null;
   risk_level: "LOW" | "MEDIUM" | "HIGH" | null;
   is_duplicate?: boolean;
+  sha256?: string | null;
+  file_hash?: string | null;
   storage_type?: string;
   is_ephemeral?: boolean;
   reviewed_by?: number | null;
@@ -64,6 +66,7 @@ export type ExtractedFields = {
   subtotal?: number | null;
   cgst?: number | null;
   sgst?: number | null;
+  igst?: number | null;
   total?: number | null;
 };
 
