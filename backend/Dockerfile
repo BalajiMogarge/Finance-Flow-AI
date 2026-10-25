@@ -9,9 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
     OPENBLAS_NUM_THREADS=1 \
     PORT=8000
 
-# Install runtime dependencies for ONNX runtime and container healthchecks
+# Install runtime dependencies for ONNX runtime, OpenCV, and container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    libglib2.0-0 \
+    libxcb1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
