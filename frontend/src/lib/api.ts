@@ -449,6 +449,18 @@ export function reviewInvoice(
   });
 }
 
+export function deleteInvoice(id: number): Promise<{ status: string; id: number }> {
+  return jsonFetch<{ status: string; id: number }>(`/api/invoices/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function clearInvoices(): Promise<{ status: string; count: number; organization_id?: number }> {
+  return jsonFetch<{ status: string; count: number; organization_id?: number }>("/api/invoices", {
+    method: "DELETE",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Async Upload & Polling Pipeline
 // ---------------------------------------------------------------------------

@@ -9,10 +9,13 @@ import {
   Download,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   ApiError,
+  clearInvoices,
+  deleteInvoice,
   fetchInvoices,
   fetchStats,
   type InvoiceRow,
@@ -34,6 +37,52 @@ export default function InvoicesPage() {
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearAll = async () => {
+    if (!window.confirm("Are you sure you want to clear ALL invoices for your organization? This action cannot be undone.")) {
+      return;
+    }
+    setClearing(true);
+    try {
+      const res = await clearInvoices();
+      toast({
+        type: "success",
+        title: "Invoices Cleared",
+        description: `Successfully removed ${res.count} invoice(s).`,
+      });
+      await loadInvoices();
+    } catch (err) {
+      toast({
+        type: "error",
+        title: "Clear Failed",
+        description: err instanceof ApiError ? err.detail || err.message : "Could not clear invoices.",
+      });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleDeleteOne = async (id: number) => {
+    if (!window.confirm(`Delete invoice #${id}? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteInvoice(id);
+      toast({
+        type: "success",
+        title: "Invoice Deleted",
+        description: `Invoice #${id} removed.`,
+      });
+      await loadInvoices();
+    } catch (err) {
+      toast({
+        type: "error",
+        title: "Delete Failed",
+        description: err instanceof ApiError ? err.detail || err.message : "Could not delete invoice.",
+      });
+    }
+  };
   const [error, setError] = useState<string | null>(null);
 
   // Filters & Pagination
@@ -213,11 +262,22 @@ export default function InvoicesPage() {
               <span>Export CSV</span>
             </button>
 
+            {invoices.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAll}
+                disabled={clearing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50/50 px-3 py-1.5 text-xs font-medium text-red-700 shadow-2xs hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
+              >
+                {clearing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                <span>Clear All</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleManualRefresh}
               disabled={refreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin text-blue-600")} />
               <span>Refresh</span>
@@ -468,14 +528,27 @@ export default function InvoicesPage() {
 
                         {/* Actions */}
                         <td className="px-6 py-3.5 text-right">
-                          <Link
-                            href={`/invoices/${inv.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-zinc-700 hover:text-blue-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:text-blue-400 dark:hover:bg-zinc-800 transition-colors"
-                          >
-                            <span>{inv.decision === "PENDING REVIEW" ? "Review" : "View"}</span>
-                            <ArrowRight className="h-3 w-3" />
-                          </Link>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Link
+                              href={`/invoices/${inv.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-zinc-700 hover:text-blue-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:text-blue-400 dark:hover:bg-zinc-800 transition-colors"
+                            >
+                              <span>{inv.decision === "PENDING REVIEW" ? "Review" : "View"}</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteOne(inv.id);
+                              }}
+                              title="Delete invoice"
+                              className="rounded-lg p-1 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 dark:hover:text-red-400 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

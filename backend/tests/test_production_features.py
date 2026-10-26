@@ -215,3 +215,27 @@ class TestProductionFeatures:
             assert "Rate limit exceeded" in r_blocked.json()["detail"]
         finally:
             upload_rate_limiter.requests_per_minute = 30
+
+    def test_delete_invoice(self, client: TestClient, test_db):
+        inv = Invoice(filename="to_delete.png", status="completed")
+        test_db.add(inv)
+        test_db.commit()
+        test_db.refresh(inv)
+
+        del_res = client.delete(f"/api/invoices/{inv.id}")
+        assert del_res.status_code == 200
+        assert del_res.json()["status"] == "deleted"
+
+        # Verify gone
+        get_res = client.get(f"/api/invoices/{inv.id}")
+        assert get_res.status_code == 404
+
+    def test_clear_invoices(self, client: TestClient, test_db):
+        for i in range(3):
+            test_db.add(Invoice(filename=f"inv_{i}.png", status="completed"))
+        test_db.commit()
+
+        clear_res = client.delete("/api/invoices")
+        assert clear_res.status_code == 200
+        assert clear_res.json()["status"] == "cleared"
+        assert clear_res.json()["count"] >= 3

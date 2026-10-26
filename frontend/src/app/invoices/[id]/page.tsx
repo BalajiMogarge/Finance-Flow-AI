@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
@@ -11,12 +12,14 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  Trash2,
   UserCheck,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import {
   ApiError,
   fetchAuditTrail,
+  deleteInvoice,
   fetchInvoice,
   getApiBase,
   reviewInvoice,
@@ -52,6 +55,31 @@ export default function InvoiceDetailPage({
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteInvoice = async () => {
+    if (!window.confirm("Are you sure you want to delete this invoice? This action cannot be undone.")) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteInvoice(invoiceId);
+      toast({
+        type: "success",
+        title: "Invoice Deleted",
+        description: `Invoice #${invoiceId} has been deleted.`,
+      });
+      router.push("/invoices");
+    } catch (err) {
+      toast({
+        type: "error",
+        title: "Delete Failed",
+        description: err instanceof ApiError ? err.detail || err.message : "Could not delete invoice.",
+      });
+      setDeleting(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     if (Number.isNaN(invoiceId)) {
@@ -222,8 +250,17 @@ export default function InvoiceDetailPage({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
-            <span>Ingested: {formatDateTimeIndian(invoice.created_at)}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-500 font-mono">Ingested: {formatDateTimeIndian(invoice.created_at)}</span>
+            <button
+              type="button"
+              onClick={handleDeleteInvoice}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50/50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 transition-colors shadow-2xs cursor-pointer"
+            >
+              {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              <span>Delete</span>
+            </button>
           </div>
         </div>
 

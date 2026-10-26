@@ -745,6 +745,70 @@ def get_invoice(
     }
 
 
+@app.delete("/api/invoices/{invoice_id}")
+@app.delete("/invoices/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Delete an invoice, its audit trail, and underlying file from storage."""
+    query = db.query(Invoice).filter(Invoice.id == invoice_id)
+    if user and user.organization_id is not None:
+        query = query.filter(Invoice.organization_id == user.organization_id)
+
+    inv = query.first()
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found or access denied.",
+        )
+
+    if inv.storage_key:
+        try:
+            storage = get_storage_provider()
+            storage.delete(inv.storage_key)
+        except Exception as exc:
+            logger.warning("Could not delete storage file %s for invoice id=%d: %s", inv.storage_key, invoice_id, exc)
+
+    db.delete(inv)
+    db.commit()
+    logger.info("Invoice id=%d deleted successfully", invoice_id)
+    return {"status": "deleted", "id": invoice_id}
+
+
+@app.delete("/api/invoices")
+@app.delete("/invoices")
+def clear_invoices(
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Clear all invoices for the active tenant organization (or Default Organization if unauthenticated)."""
+    if user and user.organization_id is not None:
+        query = db.query(Invoice).filter(Invoice.organization_id == user.organization_id)
+        org_id = user.organization_id
+    else:
+        org_id = _resolve_tenant_org(db, user)
+        query = db.query(Invoice).filter(
+            (Invoice.organization_id == org_id) | (Invoice.organization_id.is_(None))
+        )
+    invoices = query.all()
+    count = len(invoices)
+
+    storage = get_storage_provider()
+    for inv in invoices:
+        if inv.storage_key:
+            try:
+                storage.delete(inv.storage_key)
+            except Exception:
+                pass
+        db.delete(inv)
+
+    db.commit()
+    logger.info("Cleared %d invoices for organization_id=%d", count, org_id)
+    return {"status": "cleared", "count": count, "organization_id": org_id}
+
+
 @app.get("/api/invoices")
 @app.get("/invoices")
 def list_invoices(
