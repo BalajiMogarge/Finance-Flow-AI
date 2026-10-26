@@ -134,9 +134,6 @@ jobs:
             echo "Render 512MB Headroom:  $HEADROOM_MB MB ($PERCENT% free)"
             echo "=========================================================="
           fi
-            echo "Render 512MB Headroom:  $HEADROOM_MB MB ($PERCENT% free)"
-            echo "=========================================================="
-          fi
 
           # 6. Stop and remove container
           docker stop live-backend
