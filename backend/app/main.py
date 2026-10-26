@@ -174,6 +174,21 @@ def _display_filename(filename: str | None) -> str:
     return candidate.replace("\x00", "") or "upload"
 
 
+def _resolve_mime_type(content_type: str | None, file_type: str) -> str:
+    """Map detected file type to canonical MIME type for accurate inline browser previews."""
+    mime_map = {
+        "pdf": "application/pdf",
+        "png": "image/png",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "tiff": "image/tiff",
+    }
+    if content_type and content_type != "application/octet-stream":
+        return content_type
+    return mime_map.get(file_type, "application/octet-stream")
+
+
 def _resolve_tenant_org(db: Session, user: User | None) -> int:
     """Resolve active organization id for current user or default tenant."""
     if user and user.organization_id is not None:
@@ -532,7 +547,7 @@ async def create_invoice_async(
     content = b"".join(chunks)
 
     # Validate media type by magic-bytes
-    detect_file_type(content, filename)
+    file_type = detect_file_type(content, filename)
 
     # Compute SHA-256 for duplicate tracking
     sha256 = calculate_sha256(content)
@@ -558,7 +573,7 @@ async def create_invoice_async(
     storage_res = storage.save(
         filename=filename,
         content=content,
-        content_type=file.content_type or "application/octet-stream",
+        content_type=_resolve_mime_type(file.content_type, file_type),
     )
 
     # Create invoice row with processing status
@@ -617,7 +632,7 @@ async def legacy_upload(
     await file.close()
     content = b"".join(chunks)
 
-    detect_file_type(content, filename)
+    file_type = detect_file_type(content, filename)
     sha256 = calculate_sha256(content)
     org_id = _resolve_tenant_org(db, user)
 
@@ -650,7 +665,11 @@ async def legacy_upload(
         }
 
     storage = get_storage_provider()
-    storage_res = storage.save(filename, content, file.content_type or "application/octet-stream")
+    storage_res = storage.save(
+        filename=filename,
+        content=content,
+        content_type=_resolve_mime_type(file.content_type, file_type),
+    )
 
     invoice = Invoice(
         organization_id=org_id,

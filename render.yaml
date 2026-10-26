@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: finance-flow-api
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: FRONTEND_PREVIEW_REGEX
+        value: "^https://finance-flow-ai(-[a-zA-Z0-9_-]+)*\\.vercel\\.app$"
+      - key: OCR_CONCURRENCY
+        value: "1"
+      - key: OCR_MAX_IMAGE_DIM
+        value: "1200"
+      - key: OCR_TIMEOUT_SECONDS
+        value: "90"

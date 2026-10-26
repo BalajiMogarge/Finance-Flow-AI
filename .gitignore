@@ -13,6 +13,8 @@ node_modules/
 
 # ---------- Database ----------
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 backend/finance_flow.db
 backend/test_finance_flow.db

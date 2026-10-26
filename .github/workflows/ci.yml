@@ -8,11 +8,26 @@ on:
 
 jobs:
   backend-ci:
-    name: Backend Tests & Lint
+    name: Backend Tests, Lint & PostgreSQL Migrations
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: finance_flow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout repository
@@ -33,9 +48,48 @@ jobs:
         run: |
           ruff check --config pyproject.toml app tests
 
-      - name: Run Pytest Suite
+      - name: Verify Full Alembic Migration Chain on Fresh PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          DATABASE_URL_DIRECT: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+        run: |
+          # Confirms the entire migration chain applies cleanly from a completely empty PostgreSQL database
+          alembic upgrade head
+
+      - name: Verify Alembic Downgrade & Re-upgrade on PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          DATABASE_URL_DIRECT: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+        run: |
+          # Confirms rollback integrity and re-application on PostgreSQL
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Run Pytest Suite against Real PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          DATABASE_URL_DIRECT: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          ENVIRONMENT: test
         run: |
           pytest tests -v
+
+      - name: Verify Application Starts & Readiness Probe Passes on PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          DATABASE_URL_DIRECT: postgresql://postgres:postgrespassword@localhost:5432/finance_flow_test
+          ENVIRONMENT: test
+        run: |
+          python -c "
+          from app.main import app
+          from fastapi.testclient import TestClient
+          client = TestClient(app)
+          resp = client.get('/api/health/ready')
+          print('Readiness probe:', resp.status_code, resp.json())
+          assert resp.status_code == 200, f'Health check failed: {resp.status_code}'
+          data = resp.json()
+          assert data.get('database') == 'connected', f'Database not connected: {data}'
+          print('App successfully verified against real PostgreSQL!')
+          "
 
   frontend-ci:
     name: Frontend Lint & Build

@@ -75,12 +75,11 @@ _install_stubs()
 
 # Imports must come AFTER the stubs are in place so that ``app.main``
 # doesn't try to import the real (heavy) OCR packages at import time.
-from fastapi.testclient import TestClient
-
 from app import database
 from app.database import Base
 from app.main import app
 from app.models import Invoice
+from fastapi.testclient import TestClient
 
 # Path to the test-only SQLite file. Lives next to the package so the
 # test database is easy to find and to delete.

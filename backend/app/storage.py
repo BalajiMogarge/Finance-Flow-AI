@@ -97,7 +97,7 @@ class S3FileStorage(BaseStorage):
             aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
             region_name=settings.S3_REGION,
             config=Config(
-                s3={"addressing_style": "virtual"},
+                s3={"addressing_style": "path"},
                 signature_version="s3v4",
             ),
         )
@@ -131,10 +131,18 @@ class S3FileStorage(BaseStorage):
         self.s3_client.delete_object(Bucket=self.bucket, Key=key)
 
     def generate_presigned_url(self, key: str, expires_in: int = 3600) -> str:
-        """Generate a short-lived presigned URL for private S3 objects."""
+        """Generate a short-lived presigned URL for private S3 objects.
+
+        Sets ResponseContentDisposition='inline' so web browsers and iframes
+        render documents inline instead of triggering a download prompt.
+        """
         return self.s3_client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.bucket, "Key": key},
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentDisposition": "inline",
+            },
             ExpiresIn=expires_in,
         )
 

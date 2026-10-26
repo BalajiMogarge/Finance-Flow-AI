@@ -87,6 +87,15 @@ def run_live_verification() -> int:
 
     health_data = health_resp.json()
     print(f"[+] Server responded in {health_time:.2f}s (Cold-start response time)")
+
+    # Probe readiness for detailed subsystem status (database, OCR engine, storage)
+    try:
+        ready_resp = session.get(f"{base_url}/api/health/ready", timeout=30)
+        if ready_resp.status_code == 200:
+            health_data = ready_resp.json()
+    except Exception:
+        pass
+
     print(f"    Health details: status={health_data.get('status')} | ocr={health_data.get('ocr')} | db={health_data.get('database')} | storage={health_data.get('storage')}")
 
     # -------------------------------------------------------------
