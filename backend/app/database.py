@@ -29,12 +29,20 @@ def create_app_engine(database_url: str):
 
     if settings.IS_SQLITE:
         connect_args["check_same_thread"] = False
+        connect_args["timeout"] = 30
         eng = create_engine(
             database_url,
             connect_args=connect_args,
             poolclass=StaticPool if ":memory:" in database_url else None,
             future=True,
         )
+
+        @event.listens_for(eng, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
     else:
         # PostgreSQL / Neon Pooled Configuration
         connect_args["sslmode"] = "require"

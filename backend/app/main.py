@@ -8,9 +8,11 @@ health and readiness probes, and SlowAPI rate limiting.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -201,37 +203,89 @@ async def run_invoice_pipeline(invoice_id: int, db: Session | None = None) -> No
         if not inv or inv.status != "processing":
             return
 
-        storage = get_storage_provider()
-        content = storage.load(inv.storage_key)
+        storage_key = inv.storage_key
         filename = inv.filename or "invoice"
+        is_dup_initial = inv.is_duplicate
+
+        # Close/commit read transaction so database is completely unlocked during OCR
+        db.commit()
+
+        t_start = time.time()
+        logger.info("Invoice id=%d pipeline starting (file=%s)", invoice_id, filename)
+
+        storage = get_storage_provider()
+        content = storage.load(storage_key)
         file_type = detect_file_type(content, filename)
+        logger.info("Invoice id=%d file loaded from storage in %.2fs", invoice_id, time.time() - t_start)
 
         ocr_result: dict[str, Any] = {}
+        t_ocr = time.time()
 
         if file_type == "pdf":
             pdf_ocr = extract_text_from_pdf(content)
             if pdf_ocr and pdf_ocr.get("text"):
                 ocr_result = pdf_ocr
             else:
-                # Fallback to OCR on rasterized image if no digital text
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp.write(content)
-                    tmp_path = Path(tmp.name)
+                # Fallback to OCR on embedded page images in scanned PDF
+                from pypdf import PdfReader
+
+                all_lines: list[dict[str, Any]] = []
+                all_confidences: list[float] = []
                 try:
-                    ocr_result = image_to_text(tmp_path)
-                finally:
-                    tmp_path.unlink(missing_ok=True)
+                    reader = PdfReader(io.BytesIO(content))
+                    for page in reader.pages[:5]:  # limit to first 5 pages for memory safety
+                        for img_obj in page.images:
+                            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                                tmp.write(img_obj.data)
+                                tmp_path = Path(tmp.name)
+                            try:
+                                page_ocr = await asyncio.to_thread(image_to_text, tmp_path)
+                                all_lines.extend(page_ocr.get("lines", []))
+                                if page_ocr.get("average_confidence"):
+                                    all_confidences.append(page_ocr["average_confidence"])
+                            finally:
+                                tmp_path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("Scanned PDF image extraction error: %s", exc)
+
+                if all_lines:
+                    full_text = "\n".join(line["text"] for line in all_lines)
+                    avg_conf = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
+                    ocr_result = {
+                        "lines": all_lines,
+                        "text": full_text,
+                        "average_confidence": avg_conf,
+                        "line_count": len(all_lines),
+                    }
+                else:
+                    ocr_result = {
+                        "lines": [],
+                        "text": "",
+                        "average_confidence": 0.0,
+                        "line_count": 0,
+                    }
         else:
             with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".png", delete=False) as tmp:
                 tmp.write(content)
                 tmp_path = Path(tmp.name)
             try:
-                ocr_result = image_to_text(tmp_path)
+                ocr_result = await asyncio.to_thread(image_to_text, tmp_path)
             finally:
                 tmp_path.unlink(missing_ok=True)
 
+        logger.info("Invoice id=%d OCR finished in %.2fs (lines=%d)", invoice_id, time.time() - t_ocr, len(ocr_result.get("lines", [])))
+
+        t_val = time.time()
         fields = extract_invoice_fields(ocr_result)
         validation = validate_invoice(fields)
+        logger.info("Invoice id=%d extraction & validation finished in %.2fs", invoice_id, time.time() - t_val)
+
+        inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not inv:
+            return
+
+        if is_dup_initial:
+            inv.is_duplicate = True
 
         # Check vendor + invoice_number duplicates in the organization
         if fields.get("vendor") and fields.get("invoice_number"):

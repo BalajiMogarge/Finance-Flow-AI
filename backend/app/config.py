@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # OCR & Processing limits
     OCR_CONCURRENCY: int = Field(default=1, description="Maximum concurrent OCR jobs")
     OCR_MAX_IMAGE_DIM: int = Field(default=1600, description="Max width/height before downscaling image")
-    OCR_TIMEOUT_SECONDS: int = Field(default=90, description="Hard timeout per OCR job in seconds")
+    OCR_TIMEOUT_SECONDS: int = Field(default=120, description="Hard timeout per OCR job in seconds")
 
     @property
     def IS_SQLITE(self) -> bool:

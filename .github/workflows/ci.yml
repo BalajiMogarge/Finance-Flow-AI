@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, production-hardening, render-demo-ready, feature/demo-ui-redesign]
+    branches: [main, production-hardening, render-demo-ready, feature/demo-ui-redesign, feature/render-verification-and-limits]
   pull_request:
-    branches: [main, production-hardening, render-demo-ready]
+    branches: [main, production-hardening, render-demo-ready, feature/render-verification-and-limits]
 
 jobs:
   backend-ci:
@@ -73,6 +73,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -82,20 +87,52 @@ jobs:
 
       - name: Verify Execution within Render 512MB RAM Limit
         run: |
-          docker run --memory="512m" --memory-swap="512m" --rm finance-flow-backend python -c "
-          import resource
-          from app.ocr import init_ocr, image_to_text
-          from PIL import Image
-          from pathlib import Path
-          import tempfile
-          init_ocr()
-          with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-              Image.new('RGB', (800, 600), color='white').save(f.name)
-              tmp_path = Path(f.name)
-          res = image_to_text(tmp_path)
-          tmp_path.unlink(missing_ok=True)
-          peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-          print(f'Measured peak working set: {peak_mb:.2f} MB')
-          print(f'Render 512MB headroom: {512.0 - peak_mb:.2f} MB ({(512.0 - peak_mb)/512.0*100:.1f}%)')
-          print('RapidOCR initialized and executed successfully within Render 512MB cgroup limit!')
-          "
+          # 1. Launch real backend container strictly limited to 512MB RAM and swap
+          docker run -d --name live-backend \
+            --memory="512m" --memory-swap="512m" \
+            -p 8000:8000 \
+            -e ENVIRONMENT=development \
+            -e STORAGE_BACKEND=local \
+            finance-flow-backend
+
+          # 2. Install client dependency for running end-to-end API verification
+          python -m pip install --upgrade pip
+          pip install requests
+
+          # 3. Run realistic API end-to-end verification against the live container
+          TARGET_URL="http://127.0.0.1:8000" python scripts/ci_docker_memory_test.py
+
+          # 4. Check whether container was killed by Docker OOM killer
+          OOM_STATUS=$(docker inspect live-backend --format '{{.State.OOMKilled}}')
+          echo "Container OOMKilled flag: $OOM_STATUS"
+          if [ "$OOM_STATUS" = "true" ]; then
+            echo "ERROR: Container was killed by Docker OOM killer!"
+            docker logs live-backend
+            exit 1
+          fi
+
+          # 5. Extract Linux cgroup peak memory usage
+          PEAK_BYTES=$(docker exec live-backend sh -c '
+            if [ -f /sys/fs/cgroup/memory.peak ]; then
+              cat /sys/fs/cgroup/memory.peak
+            elif [ -f /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]; then
+              cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes
+            else
+              cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0
+            fi
+          ')
+
+          if [ -n "$PEAK_BYTES" ] && [ "$PEAK_BYTES" -gt 0 ] 2>/dev/null; then
+            PEAK_MB=$(awk "BEGIN {printf \"%.2f\", $PEAK_BYTES / 1024 / 1024}")
+            HEADROOM_MB=$(awk "BEGIN {printf \"%.2f\", 512 - $PEAK_MB}")
+            PERCENT=$(awk "BEGIN {printf \"%.1f\", ($HEADROOM_MB / 512) * 100}")
+            echo "=========================================================="
+            echo "REAL DOCKER 512MB PEAK MEMORY VALIDATION:"
+            echo "Container Peak RSS:     $PEAK_MB MB"
+            echo "Render 512MB Headroom:  $HEADROOM_MB MB ($PERCENT% free)"
+            echo "=========================================================="
+          fi
+
+          # 6. Stop and remove container
+          docker stop live-backend
+          docker rm live-backend
