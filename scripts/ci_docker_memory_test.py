@@ -36,19 +36,22 @@ def run_ci_test() -> int:
     # 1. Wait for server readiness
     print("[*] Waiting for server container readiness...")
     ready = False
-    for attempt in range(30):
+    last_err = None
+    for attempt in range(45):
         try:
-            r = session.get(f"{base_url}/api/health", timeout=2)
-            if r.status_code == 200 and r.json().get("status") == "ready":
+            r = session.get(f"{base_url}/api/health/ready", timeout=3)
+            if r.status_code == 200:
                 print(f"[+] Server ready in {attempt * 1.0:.1f}s! Health: {r.json()}")
                 ready = True
                 break
-        except Exception:
-            pass
+            else:
+                last_err = f"HTTP {r.status_code}: {r.text}"
+        except Exception as e:
+            last_err = str(e)
         time.sleep(1.0)
 
     if not ready:
-        print("[!] Server failed to become ready within 30 seconds!")
+        print(f"[!] Server failed to become ready within 45 seconds! Last error: {last_err}")
         return 1
 
     # 2. Register test user

@@ -12,12 +12,15 @@ echo "=== Finance Flow AI Backend Container Startup ==="
 MIGRATION_URL="${DATABASE_URL_DIRECT:-$DATABASE_URL}"
 
 if [ -n "$MIGRATION_URL" ]; then
-    echo "Executing Alembic database migrations..."
+    echo "Executing Alembic database migrations on configured database..."
     DATABASE_URL_DIRECT="$MIGRATION_URL" DATABASE_URL="$MIGRATION_URL" alembic upgrade head || {
         echo "Warning: Alembic migration encountered an error; proceeding to server start..."
     }
 else
-    echo "DATABASE_URL not set; skipping Alembic migration."
+    echo "DATABASE_URL not set; executing Alembic migrations on default SQLite database..."
+    alembic upgrade head || {
+        echo "Warning: Alembic migration encountered an error; proceeding to server start..."
+    }
 fi
 
 APP_PORT="${PORT:-8000}"

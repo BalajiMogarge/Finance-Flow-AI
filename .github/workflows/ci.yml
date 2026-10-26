@@ -100,7 +100,11 @@ jobs:
           pip install requests
 
           # 3. Run realistic API end-to-end verification against the live container
-          TARGET_URL="http://127.0.0.1:8000" python scripts/ci_docker_memory_test.py
+          TARGET_URL="http://127.0.0.1:8000" python scripts/ci_docker_memory_test.py || {
+            echo "=== Container logs on test failure ==="
+            docker logs live-backend
+            exit 1
+          }
 
           # 4. Check whether container was killed by Docker OOM killer
           OOM_STATUS=$(docker inspect live-backend --format '{{.State.OOMKilled}}')

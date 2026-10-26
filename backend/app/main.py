@@ -372,12 +372,14 @@ async def process_invoice_job(invoice_id: int) -> None:
 # Health & Readiness Probes
 # ---------------------------------------------------------------------------
 
+@app.get("/api/health")
 @app.get("/health")
 def health():
     """Instant health probe (returns immediately without DB queries)."""
     return {"status": "ok"}
 
 
+@app.get("/api/health/ready")
 @app.get("/health/ready")
 def health_ready(db: Session = Depends(get_db)):
     """Readiness probe checking database connectivity and OCR model availability."""
@@ -412,6 +414,7 @@ def health_ready(db: Session = Depends(get_db)):
 # Auth Routes
 # ---------------------------------------------------------------------------
 
+@app.post("/api/auth/register")
 @app.post("/auth/register")
 def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == req.email.lower()).first()
@@ -454,6 +457,7 @@ def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/auth/login")
 @app.post("/auth/login")
 @limiter.limit("10/minute")
 def login_user(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
@@ -478,6 +482,7 @@ def login_user(request: Request, req: LoginRequest, db: Session = Depends(get_db
     }
 
 
+@app.get("/api/auth/me")
 @app.get("/auth/me")
 def get_current_user_profile(user: User = Depends(get_current_user)):
     return {
