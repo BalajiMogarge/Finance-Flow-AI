@@ -62,7 +62,7 @@ def get_reader():
     return _engine
 
 
-def _load_image(path: Path, max_dim: int = 1600) -> np.ndarray:
+def _load_image(path: Path, max_dim: int = 1200) -> np.ndarray:
     """Load an image file into a numpy array, downscaling if oversized."""
     with Image.open(path) as img:
         img.load()

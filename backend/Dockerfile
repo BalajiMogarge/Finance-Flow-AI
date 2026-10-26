@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
+    OCR_MAX_IMAGE_DIM=1200 \
     PORT=8000
 
 # Install runtime dependencies for ONNX runtime, OpenCV, and container healthchecks
