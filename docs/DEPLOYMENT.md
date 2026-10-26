@@ -117,7 +117,7 @@ Every variable required for production deployment is listed below. **Never commi
 ### Phase 3: Deploy Backend on Render (Docker Web Service)
 
 #### Why Docker on Render's Free Tier?
-The repository uses a dedicated multi-stage **Docker deployment** (`backend/Dockerfile`) rather than native Python:
+   - **Dockerfile Path**: `Dockerfile` (or leave blank; Render defaults to `Dockerfile` inside Root Directory)
 1. **Isolated System Dependencies**: ONNX Runtime and OpenCV require native C++ runtime libraries (`libgomp1`, `libgl1`, `libglib2.0-0`). The Docker image installs these deterministically.
 2. **Zero Cold-Start Model Downloads**: RapidOCR ONNX weights are pre-cached inside the image at build time. Requests never hang waiting for external model downloads.
 3. **Hardened Low-Memory Performance**: OpenMP and math thread pools are clamped to 1 thread (`OMP_NUM_THREADS=1`), and image dimensions are capped at 1200px, keeping RAM strictly within Render's 512MB cgroup limit.
@@ -144,10 +144,10 @@ The repository uses a dedicated multi-stage **Docker deployment** (`backend/Dock
    - **Name**: `finance-flow-api`
    - **Region**: Choose region closest to your databases (e.g. `Ohio (US East)` or `Oregon (US West)`).
    - **Branch**: `main`
-   - **Root Directory**: leave blank (empty).
+   - **Root Directory**: `backend` (Recommended: sets the build context to the backend folder)
    - **Runtime**: Select **Docker**.
-   - **Dockerfile Path**: `backend/Dockerfile`
-   - **Docker Context**: `backend`
+   - **Dockerfile Path**: `Dockerfile` (or leave blank; Render defaults to `Dockerfile` inside Root Directory)
+   - *(Note: If you leave Root Directory blank, Render will automatically use the root `Dockerfile`)*
    - **Instance Type / Plan**: Select **Free** (512 MB RAM, 0.1 CPU).
 5. **Add Environment Variables**:
    Under the **Environment Variables** section, enter the following key-value pairs:

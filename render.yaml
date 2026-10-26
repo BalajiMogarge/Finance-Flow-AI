@@ -2,8 +2,7 @@ services:
   - type: web
     name: finance-flow-api
     runtime: docker
-    dockerfilePath: backend/Dockerfile
-    dockerContext: backend
+    dockerfilePath: Dockerfile
     plan: free
     region: oregon
     healthCheckPath: /api/health
