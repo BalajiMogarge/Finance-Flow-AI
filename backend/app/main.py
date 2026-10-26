@@ -11,11 +11,10 @@ import asyncio
 import io
 import json
 import logging
-import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 
 from fastapi import (
@@ -50,7 +49,7 @@ from .decision import make_decision
 from .extractor import extract_invoice_fields
 from .file_utils import calculate_sha256, detect_file_type, extract_text_from_pdf
 from .models import AuditLog, Invoice, Organization, User
-from .ocr import image_to_text, init_ocr, is_ocr_ready
+from .ocr import _ocr_semaphore, image_to_text, init_ocr, is_ocr_ready
 from .rate_limit import limiter, rate_limit_exceeded_handler
 from .storage import get_storage_provider
 from .validator import validate_invoice
@@ -250,16 +249,11 @@ async def run_invoice_pipeline(invoice_id: int, db: Session | None = None) -> No
                     reader = PdfReader(io.BytesIO(content))
                     for page in reader.pages[:5]:  # limit to first 5 pages for memory safety
                         for img_obj in page.images:
-                            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                                tmp.write(img_obj.data)
-                                tmp_path = Path(tmp.name)
-                            try:
-                                page_ocr = await asyncio.to_thread(image_to_text, tmp_path)
-                                all_lines.extend(page_ocr.get("lines", []))
-                                if page_ocr.get("average_confidence"):
-                                    all_confidences.append(page_ocr["average_confidence"])
-                            finally:
-                                tmp_path.unlink(missing_ok=True)
+                            async with _ocr_semaphore:
+                                page_ocr = await asyncio.to_thread(image_to_text, img_obj.data)
+                            all_lines.extend(page_ocr.get("lines", []))
+                            if page_ocr.get("average_confidence"):
+                                all_confidences.append(page_ocr["average_confidence"])
                 except Exception as exc:
                     logger.warning("Scanned PDF image extraction error: %s", exc)
 
@@ -280,13 +274,9 @@ async def run_invoice_pipeline(invoice_id: int, db: Session | None = None) -> No
                         "line_count": 0,
                     }
         else:
-            with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".png", delete=False) as tmp:
-                tmp.write(content)
-                tmp_path = Path(tmp.name)
-            try:
-                ocr_result = await asyncio.to_thread(image_to_text, tmp_path)
-            finally:
-                tmp_path.unlink(missing_ok=True)
+            logger.info("Invoice id=%d running OCR on %d image bytes...", invoice_id, len(content))
+            async with _ocr_semaphore:
+                ocr_result = await asyncio.to_thread(image_to_text, content)
 
         logger.info("Invoice id=%d OCR finished in %.2fs (lines=%d)", invoice_id, time.time() - t_ocr, len(ocr_result.get("lines", [])))
 
@@ -367,7 +357,7 @@ async def run_invoice_pipeline(invoice_id: int, db: Session | None = None) -> No
 
 
 async def process_invoice_job(invoice_id: int) -> None:
-    """Wrapper executing background pipeline with a hard 90-second timeout."""
+    """Wrapper executing background pipeline with a configurable timeout."""
     try:
         await asyncio.wait_for(run_invoice_pipeline(invoice_id), timeout=settings.OCR_TIMEOUT_SECONDS)
     except TimeoutError:

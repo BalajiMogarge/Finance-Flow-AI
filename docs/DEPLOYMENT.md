@@ -41,8 +41,8 @@ Every variable required for production deployment is listed below. **Never commi
 | `FRONTEND_ORIGINS` | Render | Render Dashboard | No | `https://<app>.vercel.app,http://localhost:3000` | Comma-separated list of allowed origins (**no trailing slash!**). |
 | `FRONTEND_PREVIEW_REGEX` | Render | Render Dashboard | No | `^https://finance-flow-ai(-[a-zA-Z0-9_-]+)*\.vercel\.app$` | Scoped regex allowing preview deployments on Vercel. |
 | `OCR_CONCURRENCY` | Render | Render Dashboard | No | `1` | Restricts concurrent OCR to 1 to stay within Render's 512MB RAM cap. |
-| `OCR_MAX_IMAGE_DIM` | Render | Render Dashboard | No | `1200` | Maximum image dimension before downscaling to prevent memory exhaustion. |
-| `OCR_TIMEOUT_SECONDS` | Render | Render Dashboard | No | `90` | Hard timeout per invoice processing task in seconds. |
+| `OCR_MAX_IMAGE_DIM` | Render | Render Dashboard | No | `1000` | Maximum image dimension before downscaling to prevent memory exhaustion and accelerate CPU inference. |
+| `OCR_TIMEOUT_SECONDS` | Render | Render Dashboard | No | `240` | Hard timeout per invoice processing task in seconds (provides safety margin for Render free tier). |
 | `NEXT_PUBLIC_API_URL` | Vercel | Render Dashboard | No | `https://<your-service>.onrender.com` | Base URL of backend API (**no trailing slash!**). |
 
 ---
@@ -169,8 +169,8 @@ Every variable required for production deployment is listed below. **Never commi
    | `FRONTEND_ORIGINS` | `http://localhost:3000` *(temporary placeholder until Vercel deploy)* |
    | `FRONTEND_PREVIEW_REGEX` | `^https://finance-flow-ai(-[a-zA-Z0-9_-]+)*\.vercel\.app$` |
    | `OCR_CONCURRENCY` | `1` |
-   | `OCR_MAX_IMAGE_DIM` | `1200` |
-   | `OCR_TIMEOUT_SECONDS` | `90` |
+   | `OCR_MAX_IMAGE_DIM` | `1000` |
+   | `OCR_TIMEOUT_SECONDS` | `240` |
 
 6. **Create and Deploy**:
    - Click **Create Web Service** (or **Deploy Web Service**).

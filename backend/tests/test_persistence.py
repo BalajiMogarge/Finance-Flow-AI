@@ -44,6 +44,16 @@ def _install_stubs() -> None:
 
         class _Image:
             def __init__(self, *args, **kwargs):
+                self.width = 100
+                self.height = 100
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def close(self):
                 pass
 
             def load(self):

@@ -38,6 +38,6 @@ services:
       - key: OCR_CONCURRENCY
         value: "1"
       - key: OCR_MAX_IMAGE_DIM
-        value: "1200"
+        value: "1000"
       - key: OCR_TIMEOUT_SECONDS
-        value: "90"
+        value: "240"

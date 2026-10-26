@@ -17,7 +17,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -72,7 +71,7 @@ class EnvValidator:
 
     def validate_all(self) -> int:
         print("=" * 78)
-        print(f"      FINANCE FLOW AI - DEPLOYMENT ENVIRONMENT VALIDATOR")
+        print("      FINANCE FLOW AI - DEPLOYMENT ENVIRONMENT VALIDATOR")
         print(f"      Source: {self.source_name}")
         print("=" * 78)
 
@@ -329,6 +328,20 @@ class EnvValidator:
                 self.ok("OCR_MAX_IMAGE_DIM", f"Set to {d_val}px (safe for 512MB RAM).")
         except ValueError:
             self.fail("OCR_MAX_IMAGE_DIM", f"Invalid integer '{max_dim}'.")
+
+        timeout = self.env.get("OCR_TIMEOUT_SECONDS", "240").strip()
+        try:
+            t_val = int(timeout)
+            if t_val < 120:
+                self.warn(
+                    "OCR_TIMEOUT_SECONDS",
+                    f"Set to {t_val}s. On Render free tier (0.1 vCPU limit), OCR may occasionally need > 90s.",
+                    "Recommend setting OCR_TIMEOUT_SECONDS=240 on Render free tier.",
+                )
+            else:
+                self.ok("OCR_TIMEOUT_SECONDS", f"Set to {t_val}s (safe for Render free tier).")
+        except ValueError:
+            self.fail("OCR_TIMEOUT_SECONDS", f"Invalid integer '{timeout}'.")
 
 
 def load_env_file(filepath: Path) -> dict[str, str]:

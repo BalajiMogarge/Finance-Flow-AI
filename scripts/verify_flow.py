@@ -8,13 +8,13 @@ Tests:
 5. GET /api/invoices paginated listing & server-side filters.
 """
 
+import json
 import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 import urllib.request
-import json
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLES_DIR = ROOT / "samples"
