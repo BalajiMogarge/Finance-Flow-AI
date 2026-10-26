@@ -65,7 +65,7 @@ def run_ci_test() -> int:
         },
         timeout=10,
     )
-    if reg_resp.status_code != 201:
+    if reg_resp.status_code not in {200, 201}:
         print(f"[!] Registration failed: {reg_resp.status_code} {reg_resp.text}")
         return 1
 

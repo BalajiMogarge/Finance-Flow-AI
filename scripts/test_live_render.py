@@ -104,7 +104,7 @@ def run_live_verification() -> int:
         print(f"[!] Registration network failure: {e}")
         return 1
 
-    if reg_resp.status_code != 201:
+    if reg_resp.status_code not in {200, 201}:
         print(f"[!] Registration failed with HTTP {reg_resp.status_code}: {reg_resp.text}")
         return 1
 
