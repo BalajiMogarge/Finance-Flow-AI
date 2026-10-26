@@ -71,6 +71,64 @@ class DecisionUnitTests(unittest.TestCase):
         # The reason should mention the success path.
         self.assertIn("passed", result["reason"].lower())
 
+    def test_approved_invoice_with_igst(self):
+        fields = {
+            "invoice_number": "INV-IGST-01",
+            "vendor": "Interstate Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 2000.0,
+            "igst": 360.0,
+            "cgst": None,
+            "sgst": None,
+            "total": 2360.0,
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.95,
+        )
+        self.assertEqual(result["decision"], "APPROVE")
+        self.assertEqual(result["risk_level"], "LOW")
+
+    def test_reconciles_noisy_symmetric_gst(self):
+        fields = {
+            "invoice_number": "INV-SYM-01",
+            "vendor": "Equip Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 40000.0,
+            "cgst": 3600.0,
+            "sgst": 73600.0,  # OCR misread leading symbol
+            "total": 47200.0,
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.92,
+        )
+        self.assertEqual(result["decision"], "APPROVE")
+        self.assertEqual(result["risk_level"], "LOW")
+
+    def test_rejected_invoice_igst_mismatch(self):
+        fields = {
+            "invoice_number": "INV-IGST-02",
+            "vendor": "Interstate Supplies Ltd",
+            "date": "2026-08-20",
+            "gstin": VALID_GSTIN,
+            "subtotal": 2000.0,
+            "igst": 360.0,
+            "total": 2999.0,  # Mismatch
+        }
+        result = make_decision(
+            _approved_validation(),
+            fields,
+            confidence=0.95,
+        )
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertEqual(result["risk_level"], "HIGH")
+        self.assertIn("amount", result["reason"].lower())
+
     # ------------------------------------------------------------------
     # REJECT
     # ------------------------------------------------------------------
@@ -239,13 +297,14 @@ class UploadEndpointTests(unittest.TestCase):
 
         import tempfile
 
-        from app.config import settings
-        from app.database import Base, get_db
-        from app.main import app
         from fastapi.testclient import TestClient
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         from sqlalchemy.pool import StaticPool
+
+        from app.config import settings
+        from app.database import Base, get_db
+        from app.main import app
 
         self._temp_dir = tempfile.mkdtemp()
         self._orig_upload_dir = settings.UPLOAD_DIR

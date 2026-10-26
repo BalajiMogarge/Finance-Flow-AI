@@ -72,19 +72,62 @@ def _is_present(value: Any) -> bool:
 
 
 def amounts_consistent(fields: dict[str, Any]) -> bool:
-    """Check if subtotal + cgst + sgst equals total within 1.00 INR tolerance."""
+    """Check if subtotal + taxes equals total within 1.00 INR tolerance.
+
+    Handles:
+    - Intra-state GST: subtotal + cgst + sgst == total
+    - Inter-state GST: subtotal + igst == total
+    - Combined taxes: subtotal + cgst + sgst + igst == total (if multiple present)
+    """
     subtotal = fields.get("subtotal")
+    total = fields.get("total")
     cgst = fields.get("cgst")
     sgst = fields.get("sgst")
-    total = fields.get("total")
+    igst = fields.get("igst")
 
-    if None in (subtotal, cgst, sgst, total):
+    if subtotal is None or total is None:
         return True  # Insufficient information to penalize
 
     try:
-        expected = float(subtotal) + float(cgst) + float(sgst)
-        diff = abs(expected - float(total))
-        return round(diff, 2) <= 1.00
+        subtotal_val = float(subtotal)
+        total_val = float(total)
+        cgst_val = float(cgst) if cgst is not None else None
+        sgst_val = float(sgst) if sgst is not None else None
+        igst_val = float(igst) if igst is not None else None
+
+        has_cgst_sgst = cgst_val is not None and sgst_val is not None
+        has_igst = igst_val is not None
+
+        # If no tax fields are extracted, cannot penalize
+        if not has_cgst_sgst and not has_igst:
+            return True
+
+        candidates: list[float] = []
+
+        # 1. Inter-state IGST
+        if has_igst:
+            candidates.append(subtotal_val + igst_val)
+            if cgst_val is not None or sgst_val is not None:
+                candidates.append(subtotal_val + igst_val + (cgst_val or 0.0) + (sgst_val or 0.0))
+
+        # 2. Intra-state CGST + SGST
+        if has_cgst_sgst:
+            candidates.append(subtotal_val + cgst_val + sgst_val)
+            # Under Indian GST, CGST and SGST must be equal amounts. In case OCR
+            # noisy-corrupted one tax amount (e.g. misreading '₹36,000' as '736,000'),
+            # test symmetric tax candidates:
+            candidates.append(subtotal_val + (cgst_val * 2))
+            candidates.append(subtotal_val + (sgst_val * 2))
+        elif cgst_val is not None:
+            candidates.append(subtotal_val + (cgst_val * 2))
+        elif sgst_val is not None:
+            candidates.append(subtotal_val + (sgst_val * 2))
+
+        for expected in candidates:
+            if round(abs(expected - total_val), 2) <= 1.00:
+                return True
+
+        return False
     except (TypeError, ValueError):
         return False
 

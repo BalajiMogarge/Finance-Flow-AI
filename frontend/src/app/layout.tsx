@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ColdStartBanner } from "@/components/ColdStartBanner";
+import { ToastProvider } from "@/components/Toast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,12 +14,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-import { ColdStartBanner } from "@/components/ColdStartBanner";
-
 export const metadata: Metadata = {
-  title: "Finance Flow AI — Invoice Verification",
+  title: "Finance Flow AI — Deterministic Invoice Audit & Reconciliation",
   description:
-    "AI-powered invoice verification. Upload, validate, and reconcile in minutes.",
+    "Deterministic corporate invoice verification, GSTIN checksum auditing, and human exception workflow.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -27,8 +27,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-background text-foreground">
-        <ColdStartBanner />
-        {children}
+        <ToastProvider>
+          <ColdStartBanner />
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

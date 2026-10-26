@@ -1,190 +1,53 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Navbar } from "@/components/Navbar";
-import { UploadCard } from "@/components/UploadCard";
 import { StatsCards } from "@/components/StatsCards";
+import { UploadCard } from "@/components/UploadCard";
+import { DashboardAnalytics } from "@/components/DashboardAnalytics";
+import { NeedsReviewList } from "@/components/NeedsReviewList";
 import { RecentInvoicesTable } from "@/components/RecentInvoicesTable";
-import { UploadResultPanel } from "@/components/UploadResultPanel";
-import type { UploadResponse, InsightsResponse } from "@/lib/api";
-import { fetchInsights } from "@/lib/api";
 
 export default function DashboardPage() {
-  // The results of successful uploads in the current session.
-  const [uploadResults, setUploadResults] = useState<UploadResponse[]>([]);
-  const [insights, setInsights] = useState<InsightsResponse | null>(null);
-  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
-
-  async function loadInsights() {
-    setIsLoadingInsights(true);
-    try {
-      const data = await fetchInsights(30);
-      setInsights(data);
-    } catch (err) {
-      console.error("Failed to load insights:", err);
-    } finally {
-      setIsLoadingInsights(false);
-    }
-  }
-
-  async function handleRunVerification() {
-    setIsVerifying(true);
-    try {
-      await loadInsights();
-      window.dispatchEvent(new Event("finance-flow:refresh"));
-    } finally {
-      setTimeout(() => setIsVerifying(false), 400);
-    }
-  }
-
-  useEffect(() => {
-    loadInsights();
-  }, []);
-
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <Navbar />
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         {/* Page header */}
-        <div className="mb-8 flex flex-col gap-1 sm:mb-10">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl dark:text-zinc-50">
-            Dashboard
-          </h1>
-          <p className="text-sm text-zinc-500 sm:text-base dark:text-zinc-400">
-            Upload invoices, monitor verification, and reconcile in one place.
-          </p>
+        <div className="mb-6 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-zinc-900 sm:text-2xl dark:text-zinc-50">
+              Accounts Payable Audit & Reconciliation
+            </h1>
+            <p className="text-xs text-zinc-500 sm:text-sm dark:text-zinc-400">
+              Deterministic GSTIN checksums, line-item balancing, and human exception workflow.
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-8">
+        <div className="space-y-6">
+          {/* Key Metric Cards */}
           <StatsCards />
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-            <div className="space-y-6 lg:col-span-3">
-              <UploadCard
-                onUploadComplete={(result) => {
-                  setUploadResults((prev) => [...prev, result]);
-                  loadInsights();
-                }}
-              />
-              <div className="space-y-4">
-                {uploadResults.length > 0 && (
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">
-                      Session Results
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setUploadResults([])}
-                      className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                )}
-                {uploadResults.map((result, idx) => (
-                  <UploadResultPanel
-                    key={`${result.filename}-${idx}`}
-                    result={result}
-                    onDismiss={() => {
-                      setUploadResults((prev) => prev.filter((_, i) => i !== idx));
-                    }}
-                  />
-                ))}
-              </div>
+          {/* Primary Split: Compact Ingestion + Analytics */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <div className="lg:col-span-7 space-y-6">
+              <UploadCard />
+              <NeedsReviewList />
             </div>
 
-            <aside className="lg:col-span-2">
-              <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                  AI insights
-                </h2>
-                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Generated from your last 30 days of invoice activity.
-                </p>
-
-                <ul className="mt-5 space-y-4 text-sm">
-                  {isLoadingInsights ? (
-                    <li className="flex items-center gap-3 py-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-600 dark:border-zinc-700 dark:border-t-blue-400" />
-                      <p className="text-zinc-500">Calculating insights...</p>
-                    </li>
-                  ) : insights ? (
-                    <>
-                      <li className="flex gap-3">
-                        <span
-                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600"
-                          aria-hidden
-                        />
-                        <p className="text-zinc-700 dark:text-zinc-300">
-                          Top vendor is{" "}
-                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                            {insights.top_vendor}
-                          </span>
-                          .
-                        </p>
-                      </li>
-                      <li className="flex gap-3">
-                        <span
-                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
-                          aria-hidden
-                        />
-                        <p className="text-zinc-700 dark:text-zinc-300">
-                          Overall approval rate:{" "}
-                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                            {insights.approval_rate}%
-                          </span>
-                          .
-                        </p>
-                      </li>
-                      <li className="flex gap-3">
-                        <span
-                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
-                          aria-hidden
-                        />
-                        <p className="text-zinc-700 dark:text-zinc-300">
-                          {insights.high_value_count} approved high-value invoices.
-                        </p>
-                      </li>
-                      <li className="flex gap-3">
-                        <span
-                          className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400"
-                          aria-hidden
-                        />
-                        <p className="text-zinc-700 dark:text-zinc-300">
-                          Verification accuracy:{" "}
-                          <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                            {insights.accuracy}%
-                          </span>
-                          .
-                        </p>
-                      </li>
-                    </>
-                  ) : (
-                    <li className="text-zinc-500">No insights available.</li>
-                  )}
-                </ul>
-
-                <div className="mt-auto pt-6">
-                  <button
-                    type="button"
-                    onClick={handleRunVerification}
-                    disabled={isVerifying}
-                    className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-75"
-                  >
-                    {isVerifying ? "Verifying & syncing..." : "Run verification"}
-                  </button>
-                </div>
-              </section>
-            </aside>
+            <div className="lg:col-span-5">
+              <DashboardAnalytics />
+            </div>
           </div>
 
+          {/* Recent Activity Table */}
           <RecentInvoicesTable />
         </div>
 
-        <footer className="mt-12 border-t border-zinc-200 pt-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          © 2026 Finance Flow AI · Built for production
+        {/* Honest, Clean Footer */}
+        <footer className="mt-12 border-t border-zinc-200/80 py-6 text-center text-xs text-zinc-500 dark:border-zinc-800/80 dark:text-zinc-400">
+          Finance Flow AI · Automated AP Auditing & Regulatory Checksums
         </footer>
       </main>
     </div>

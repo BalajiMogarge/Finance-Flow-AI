@@ -4,14 +4,17 @@ FROM python:3.11-slim
 # System configuration and low-memory performance tuning
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
     PORT=8000
 
-# Install runtime dependencies for ONNX runtime and container healthchecks
+# Install runtime dependencies for ONNX runtime, OpenCV, and container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    libgl1 \
+    libglib2.0-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

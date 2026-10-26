@@ -14,6 +14,11 @@ Verifies:
 import io
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.auth import create_access_token, hash_password
 from app.database import Base, get_db
 from app.decision import make_decision
@@ -21,10 +26,6 @@ from app.extractor import extract_invoice_fields
 from app.main import app
 from app.models import Invoice, Organization, User
 from app.validator import amounts_consistent, validate_gstin_checksum, validate_invoice
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Test Fixtures
