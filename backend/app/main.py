@@ -347,6 +347,8 @@ async def run_invoice_pipeline(invoice_id: int, db: Session | None = None) -> No
     finally:
         if should_close:
             db.close()
+        import gc
+        gc.collect()
 
 
 async def process_invoice_job(invoice_id: int) -> None:

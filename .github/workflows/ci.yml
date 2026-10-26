@@ -115,24 +115,25 @@ jobs:
             exit 1
           fi
 
-          # 5. Extract Linux cgroup peak memory usage
-          PEAK_BYTES=$(docker exec live-backend sh -c '
-            if [ -f /sys/fs/cgroup/memory.peak ]; then
-              cat /sys/fs/cgroup/memory.peak
-            elif [ -f /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]; then
-              cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes
-            else
-              cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0
-            fi
-          ')
+          # 5. Extract Linux cgroup peak and working memory usage
+          PEAK_BYTES=$(docker exec live-backend sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null || echo 0')
+          CURR_BYTES=$(docker exec live-backend sh -c 'cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0')
+          ANON_BYTES=$(docker exec live-backend sh -c 'awk "/^anon / {print \$2}" /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0')
 
           if [ -n "$PEAK_BYTES" ] && [ "$PEAK_BYTES" -gt 0 ] 2>/dev/null; then
             PEAK_MB=$(awk "BEGIN {printf \"%.2f\", $PEAK_BYTES / 1024 / 1024}")
+            CURR_MB=$(awk "BEGIN {printf \"%.2f\", $CURR_BYTES / 1024 / 1024}")
+            ANON_MB=$(awk "BEGIN {printf \"%.2f\", $ANON_BYTES / 1024 / 1024}")
             HEADROOM_MB=$(awk "BEGIN {printf \"%.2f\", 512 - $PEAK_MB}")
             PERCENT=$(awk "BEGIN {printf \"%.1f\", ($HEADROOM_MB / 512) * 100}")
             echo "=========================================================="
             echo "REAL DOCKER 512MB PEAK MEMORY VALIDATION:"
-            echo "Container Peak RSS:     $PEAK_MB MB"
+            echo "Container Peak Cgroup:  $PEAK_MB MB (includes reclaimable cache)"
+            echo "Container Current Mem:  $CURR_MB MB"
+            echo "Container Anon RSS:     $ANON_MB MB (actual process heap/stack)"
+            echo "Render 512MB Headroom:  $HEADROOM_MB MB ($PERCENT% free)"
+            echo "=========================================================="
+          fi
             echo "Render 512MB Headroom:  $HEADROOM_MB MB ($PERCENT% free)"
             echo "=========================================================="
           fi
